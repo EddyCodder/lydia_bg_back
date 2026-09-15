@@ -224,17 +224,17 @@ Currently, the project has minimal formal testing infrastructure:
 
 ---
 
-# evolution_brittanygroup — notas de Brittany Group
+# lydia_bg_back — notas de Brittany Group
 
 Todo lo de arriba es la documentación original del proyecto Evolution API (no tocada). Lo de acá abajo es específico de cómo Brittany Group usa este fork — para trabajo propio de Brittany, esto tiene prioridad sobre "Always respond in Portuguese" de la sección anterior (esa instrucción es para contribuir al proyecto Evolution API en sí, no para el trabajo de Brittany sobre el fork).
 
-Fork propio de [evolution-foundation/evolution-api](https://github.com/evolution-foundation/evolution-api) (CRM-8, 2026-09-15). El org se renombró desde `EvolutionAPI`; la imagen Docker Hub correspondiente es `evoapicloud/evolution-api`, que es lo que reemplaza este fork en `CRM_brittanygroup/docker-compose.yml` — ese cambio (buildear desde este fork en vez de pullear la imagen oficial) todavía no está hecho.
+Fork propio de [evolution-foundation/evolution-api](https://github.com/evolution-foundation/evolution-api) (CRM-8, 2026-09-15; carpeta y repo renombrados el mismo día de `evolution_brittanygroup` a `lydia_bg_back`). El org se renombró desde `EvolutionAPI`; la imagen Docker Hub correspondiente es `evoapicloud/evolution-api`, que es lo que reemplaza este fork en `CRM_brittanygroup/docker-compose.yml` — ese cambio (buildear desde este fork en vez de pullear la imagen oficial) todavía no está hecho.
 
 Ver `CRM_brittanygroup/CLAUDE.md` para el contexto completo del proyecto CRM (Chatwoot + Evolution API + Lydia).
 
 ## Remotos
 
-- `origin` → `EddyCodder/evolution-api` (el fork, donde se pushea).
+- `origin` → `EddyCodder/lydia_bg_back` (el fork, donde se pushea).
 - `upstream` → `evolution-foundation/evolution-api` (el oficial, para traer actualizaciones: `git fetch upstream` + merge/rebase).
 
 ## ⚠️ Licencia — leer antes de tocar código

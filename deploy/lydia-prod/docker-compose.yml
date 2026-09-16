@@ -1,0 +1,162 @@
+name: lydia-prod
+
+# Instancia de PRODUCCION de Lydia (CRM-10/CRM-11), en el VPS de Brittany
+# Group (144.91.113.27). Separada del stack de CRM_lab (Chatwoot + Evolution
+# API sobre servidor-personal), que era un proyecto sin relacion, ya
+# retirado de este ecosistema.
+#
+# CRM-11: se descarto Chatwoot como bandeja (build de 20+ min por la gema
+# grpc de Dialogflow, sin uso real) a favor de un frontend Next.js propio,
+# que ahora vive en lydia_bg_front reemplazando el codigo de Chatwoot.
+# `frontend` abajo se buildea desde ahi. Evolution API sigue siendo el fork
+# propio lydia_bg_back.
+#
+# Layout esperado en el VPS (creado por el provisioning, no por este repo):
+#   /lydia_prod/back/    <- checkout de lydia_bg_back (rsync desde CI)
+#   /lydia_prod/front/   <- checkout de lydia_bg_front (rsync desde CI)
+#   /lydia_prod/docker-compose.yml  <- copia de este archivo
+#   /lydia_prod/.env     <- secretos, nunca en git (ver .env.example)
+#
+# Puertos publicados solo en 127.0.0.1: Nginx en el host hace de reverse
+# proxy hacia crm.brittanygroup.edu.pe / api-crm.brittanygroup.edu.pe con
+# certificados via certbot, igual que el resto de dominios del VPS. CRM_lab
+# publica en 0.0.0.0 porque ahi el reverse proxy (Traefik) corre en otro
+# contenedor del mismo host; aca Nginx corre fuera de Docker.
+
+services:
+  # --------------------------------------------------------------------------
+  # PostgreSQL 16 (Chatwoot + Evolution API)
+  # --------------------------------------------------------------------------
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: lydia_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_DATABASE_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_DATABASE_PASSWORD}
+      POSTGRES_DB: ${PG_DATABASE_NAME:-default}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    networks:
+      lydia_internal_net:
+        aliases:
+          - db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_DATABASE_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------------------
+  # Redis 7 (cache y colas Sidekiq de Chatwoot y Evolution API)
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: lydia_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      lydia_internal_net:
+        aliases:
+          - redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------------------
+  # Frontend de Lydia -- build desde lydia_bg_front (Next.js, CRM-11)
+  # --------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./front
+    image: lydia-frontend:prod
+    container_name: lydia_frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3009:3000"
+    environment:
+      TZ: America/Lima
+      # Apagado por defecto (CRM-9/CRM-11): sin backend de conversaciones
+      # real todavia (eso es CRM-12), el frontend cae solo a datos de
+      # ejemplo. Prender junto con las tres variables de abajo cuando
+      # CRM-12 tenga endpoints reales que apuntar aca.
+      NEXT_PUBLIC_CHATWOOT_ENABLED: "false"
+      CHATWOOT_BASE_URL: ${CHATWOOT_BASE_URL:-}
+      CHATWOOT_API_TOKEN: ${CHATWOOT_API_TOKEN:-}
+      CHATWOOT_ACCOUNT_ID: ${CHATWOOT_ACCOUNT_ID:-}
+    networks:
+      - lydia_internal_net
+
+  # --------------------------------------------------------------------------
+  # Evolution API v2 -- build desde el fork lydia_bg_back (no Docker Hub)
+  # --------------------------------------------------------------------------
+  evolution-api:
+    build:
+      context: ./back
+    image: lydia-evolution-api:prod
+    container_name: lydia_evolution_api
+    restart: unless-stopped
+    # 8091, no 8090: el 8090 ya lo ocupa la LAPI de CrowdSec en este VPS
+    # (se corrio ahi porque tiacherback-prod ya tenia el 8080, ver
+    # /etc/crowdsec/config.yaml) -- publicar aca encima la hubiera tumbado.
+    ports:
+      - "127.0.0.1:8091:8080"
+    environment:
+      TZ: America/Lima
+      SERVER_URL: https://${EVO_DOMAIN:-api-crm.brittanygroup.edu.pe}
+      SERVER_PORT: 8080
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD}@db:5432/evolution?schema=public
+      DATABASE_CLIENT_NAME: evolution_whatsapp
+
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379/1
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_LOCAL_ENABLED: "false"
+
+      LOG_LEVEL: ERROR,WARN,DEBUG,INFO,LOG
+      LOG_COLOR: "true"
+      LOG_BAILEYS: error
+
+      # CRM-11: sin Chatwoot en el stack, esta integracion queda apagada.
+      # CRM-12 va a reemplazarla por los endpoints propios que exponga
+      # `frontend`/`lydia_bg_back` en vez de una base de Chatwoot.
+      CHATWOOT_ENABLED: "false"
+
+      CONFIG_SESSION_PHONE_CLIENT: "Brittany Chat"
+      CONFIG_SESSION_PHONE_NAME: Chrome
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - lydia_internal_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+# ----------------------------------------------------------------------------
+# Volumenes persistentes
+# ----------------------------------------------------------------------------
+volumes:
+  pg_data:
+    name: lydia_pg_data
+  redis_data:
+    name: lydia_redis_data
+  evolution_instances:
+    name: lydia_evolution_instances
+
+# ----------------------------------------------------------------------------
+# Red interna aislada
+# ----------------------------------------------------------------------------
+networks:
+  lydia_internal_net:
+    name: lydia_internal_net

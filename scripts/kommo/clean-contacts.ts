@@ -65,15 +65,19 @@ const PENDING_MAPPING_COLUMNS = ['Etiquetas', 'Nota 1', 'Nota 2', 'Nota 3', 'Not
 const AGENT_MAP: Record<string, { id: string; nombre: string }> = {
   mafer: { id: 'agent_mmaturrano', nombre: 'María Fernanda Maturano Evangelista' },
   bustamante: { id: 'agent_pkasparette', nombre: 'Pierina Kasparette Melgar' },
-  // Pendiente (LYD-3), confirmado con el negocio 2026-09-17:
-  // - "Centro" y "Cayma" son sedes propias, DISTINTAS de "Lince"/"Umacollo"
-  //   (esas dos si tienen asesora de referencia fija -- Lince -> Maria
-  //   Fernanda Maturano, Umacollo -> Polet Ccope -- pero no aplican aca).
-  //   Falta el nombre real de la asesora de Centro y de Cayma.
-  // - "Brittany Miraflores" queda sin mapear a proposito (decision del
-  //   negocio, no falta de dato): "por ahora dejalo con MIRAFLORES".
-  // centro: { id: '???', nombre: '???' },
-  // cayma: { id: '???', nombre: '???' },
+  // Centro y Cayma: confirmado que son sedes propias, DISTINTAS de
+  // "Lince"/"Umacollo". Se resolvieron consultando la tabla `sedes` /
+  // `user_sedes` de la base de produccion del SGA (2026-09-17): cada una
+  // tiene 2 asesoras activas asignadas y no hay forma de diferenciar por
+  // fila de Kommo cual atendio cada contacto, asi que el negocio eligio una
+  // de referencia igual que hizo con Bustamante.
+  centro: { id: 'agent_cveliz', nombre: 'Cynthia Veliz Fernandini' },
+  cayma: { id: 'agent_vrivera', nombre: 'Yoxsana Valentina Rivera Molina' },
+  // "Brittany Miraflores" queda sin mapear a proposito: la sede Miraflores
+  // no tiene NINGUNA asesora activa en el SGA hoy (solo Rosi Lara, inactiva
+  // -- coincide con el valor "Rosy" que aparecia sin match en "Modificado
+  // por"). No hay a quien asignarselo todavia.
+  // 'brittany miraflores': { id: '???', nombre: '???' },
 };
 
 interface RawRow {
@@ -267,8 +271,8 @@ function main() {
   }
   const conAgente = importables.filter((r) => r.agentId).length;
   console.log(`\nUsuario responsable resuelto contra Agent real: ${conAgente}/${importables.length} filas importables`);
-  console.log('(AGENT_MAP en este script -- Mafer y Bustamante confirmados; Centro, Cayma y');
-  console.log('Brittany Miraflores siguen sin mapeo, ver SIN_MAPEO_AGENTE y comentarios en AGENT_MAP)');
+  console.log('(AGENT_MAP en este script -- Mafer, Bustamante, Centro y Cayma confirmados;');
+  console.log('Brittany Miraflores sigue sin mapeo, ver SIN_MAPEO_AGENTE y comentarios en AGENT_MAP)');
   console.log(`\nEscrito: ${cleanedPath} (${importables.length} filas)`);
   console.log(`Escrito: ${reviewPath} (${importables.filter((r) => r.flags).length} filas para revision manual)`);
   console.log(`Escrito: ${discardedPath} (${descartadas.length} filas, no se cargan)`);

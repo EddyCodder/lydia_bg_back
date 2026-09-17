@@ -9,9 +9,13 @@
  *   npx tsx scripts/kommo/clean-contacts.ts --input <ruta-al-xlsx>
  *   npx tsx scripts/kommo/clean-contacts.ts   (usa ./kommo_export_contacts.xlsx si existe)
  *
- * Salida (ambas gitignored, ver .gitignore): dos CSV junto al input:
- *   <input>.limpio.csv   -- todas las filas, columnas mapeadas
- *   <input>.revisar.csv  -- solo las filas con al menos un flag (ver FLAGS)
+ * Salida (todas gitignored, ver .gitignore): tres CSV junto al input:
+ *   <input>.limpio.csv      -- filas importables, columnas mapeadas
+ *   <input>.revisar.csv     -- de las importables, solo las que quedan con
+ *                               algun flag (ver FLAGS) para revision manual
+ *   <input>.descartadas.csv -- filas SIN_LEAD (decision del negocio, LYD-3:
+ *                               no se cargan) -- se guardan aparte, no se
+ *                               pierden silenciosamente
  *
  * xlsx@0.18.5 (npm) tiene advisories de prototype-pollution/ReDoS sin fix
  * publicado en el registro (SheetJS solo lo distribuye por su propio CDN).
@@ -61,17 +65,15 @@ const PENDING_MAPPING_COLUMNS = ['Etiquetas', 'Nota 1', 'Nota 2', 'Nota 3', 'Not
 const AGENT_MAP: Record<string, { id: string; nombre: string }> = {
   mafer: { id: 'agent_mmaturrano', nombre: 'María Fernanda Maturano Evangelista' },
   bustamante: { id: 'agent_pkasparette', nombre: 'Pierina Kasparette Melgar' },
-  // Pendiente de confirmar (LYD-3): "Lince" -> Maria Fernanda Maturano y
-  // "Umacollo" -> Polet Ccope Ccencho son las asesoras de referencia que dio
-  // el negocio, pero esos nombres de sede no aparecen tal cual en el export
-  // -- lo que si aparece es "Centro" y "Cayma". Falta confirmar si son la
-  // misma sede (Centro=Lince, Cayma=Umacollo) antes de activar estas dos
-  // lineas. Ver nota en el ticket.
-  // centro: { id: 'agent_mmaturrano', nombre: 'María Fernanda Maturano Evangelista' }, // si Centro = Lince
-  // cayma: { id: 'agent_pccope', nombre: 'Polet Ccope Ccencho' }, // si Cayma = Umacollo
-  // Pendiente de confirmar (LYD-3): falta el nombre de la asesora de
-  // Miraflores para completar esta linea.
-  // 'brittany miraflores': { id: '???', nombre: '???' },
+  // Pendiente (LYD-3), confirmado con el negocio 2026-09-17:
+  // - "Centro" y "Cayma" son sedes propias, DISTINTAS de "Lince"/"Umacollo"
+  //   (esas dos si tienen asesora de referencia fija -- Lince -> Maria
+  //   Fernanda Maturano, Umacollo -> Polet Ccope -- pero no aplican aca).
+  //   Falta el nombre real de la asesora de Centro y de Cayma.
+  // - "Brittany Miraflores" queda sin mapear a proposito (decision del
+  //   negocio, no falta de dato): "por ahora dejalo con MIRAFLORES".
+  // centro: { id: '???', nombre: '???' },
+  // cayma: { id: '???', nombre: '???' },
 };
 
 interface RawRow {
@@ -175,6 +177,12 @@ function main() {
       const parsed = parsePhoneNumberFromString(telefonoRaw, 'PE');
       if (!parsed || !parsed.isValid()) {
         flags.push('TELEFONO_INVALIDO');
+        // Decision del negocio (LYD-3): no descartar estas filas -- se arma
+        // un remoteJid "best effort" con los digitos crudos aunque no se
+        // pueda validar el numero (ej. le faltan digitos). Puede no
+        // corresponder a un WhatsApp real; el flag queda para revisarlo.
+        const digits = telefonoRaw.replace(/\D/g, '');
+        if (digits) remoteJid = `${digits}@s.whatsapp.net`;
       } else {
         remoteJid = `${parsed.number.replace('+', '')}@s.whatsapp.net`;
         telefonoPais = parsed.country || '';
@@ -230,29 +238,40 @@ function main() {
     });
   }
 
+  // Decision del negocio (LYD-3): las filas sin lead vinculado no se cargan
+  // (varias son claramente spam/basura, y sin lead no hay con que
+  // contrastarlas). Se separan en su propio CSV en vez de borrarlas sin
+  // dejar rastro.
+  const descartadas = cleaned.filter((r) => r.flags.includes('SIN_LEAD'));
+  const importables = cleaned.filter((r) => !r.flags.includes('SIN_LEAD'));
+
   const outBase = inputPath.replace(/\.xlsx$/i, '');
   const cleanedPath = `${outBase}.limpio.csv`;
   const reviewPath = `${outBase}.revisar.csv`;
+  const discardedPath = `${outBase}.descartadas.csv`;
 
-  writeCsv(cleanedPath, cleaned);
+  writeCsv(cleanedPath, importables);
   writeCsv(
     reviewPath,
-    cleaned.filter((r) => r.flags),
+    importables.filter((r) => r.flags),
   );
+  writeCsv(discardedPath, descartadas);
 
   console.log(`Filas procesadas: ${rows.length}`);
+  console.log(`Descartadas (SIN_LEAD, no se cargan): ${descartadas.length}`);
   console.log(`Columnas descartadas (siempre/casi siempre vacias, sin info nueva): ${DROPPED_COLUMNS.length}`);
   console.log(`Columnas sin destino en el modelo actual, conservadas igual: ${PENDING_MAPPING_COLUMNS.join(', ')}`);
   console.log('\nFlags (una fila puede tener mas de uno):');
   for (const [flag, count] of Object.entries(flagCounts).sort((a, b) => b[1] - a[1])) {
     console.log(`  ${flag.padEnd(24)} ${count}`);
   }
-  const conAgente = cleaned.filter((r) => r.agentId).length;
-  console.log(`\nUsuario responsable resuelto contra Agent real: ${conAgente}/${rows.length} filas`);
+  const conAgente = importables.filter((r) => r.agentId).length;
+  console.log(`\nUsuario responsable resuelto contra Agent real: ${conAgente}/${importables.length} filas importables`);
   console.log('(AGENT_MAP en este script -- Mafer y Bustamante confirmados; Centro, Cayma y');
   console.log('Brittany Miraflores siguen sin mapeo, ver SIN_MAPEO_AGENTE y comentarios en AGENT_MAP)');
-  console.log(`\nEscrito: ${cleanedPath}`);
-  console.log(`Escrito: ${reviewPath} (${cleaned.filter((r) => r.flags).length} filas para revision manual)`);
+  console.log(`\nEscrito: ${cleanedPath} (${importables.length} filas)`);
+  console.log(`Escrito: ${reviewPath} (${importables.filter((r) => r.flags).length} filas para revision manual)`);
+  console.log(`Escrito: ${discardedPath} (${descartadas.length} filas, no se cargan)`);
 }
 
 function writeCsv(filePath: string, rows: CleanRow[]) {

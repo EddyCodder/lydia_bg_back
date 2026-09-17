@@ -18,6 +18,10 @@ lerna-debug.log*
 /docker-compose-data
 /docker-data
 
+# LYD-3: exports de leads/contactos (datos personales reales, nunca a git)
+kommo_export_contacts.xlsx
+*.kommo_export.*
+
 # Package
 /yarn.lock
 /pnpm-lock.yaml

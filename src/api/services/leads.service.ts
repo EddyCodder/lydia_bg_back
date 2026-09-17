@@ -34,9 +34,41 @@ export class LeadsService {
     source: string;
     budget?: string;
     budgetAmount?: number;
+    observations?: string;
     chatId?: string;
     assignedAgentId?: string;
   }) {
+    return this.insertLead(data);
+  }
+
+  // LYD-12: bypass para cargas historicas (ej. migracion de Kommo) -- sin
+  // esto Prisma pone NOW() en el create y se pierde la fecha real. A
+  // proposito NO esta expuesto en createLead/POST /crm/leads (ahi solo
+  // llega el apikey compartido como guarda, cualquier caller podria
+  // backdatear un lead) -- es para uso directo de un futuro script de
+  // migracion contra este service, nunca por HTTP.
+  public async createHistoricalLead(
+    data: Parameters<LeadsService['createLead']>[0] & { createdAt: Date; updatedAt: Date },
+  ) {
+    return this.insertLead(data, { createdAt: data.createdAt, updatedAt: data.updatedAt });
+  }
+
+  private async insertLead(
+    data: {
+      contactName: string;
+      company?: string;
+      phone?: string;
+      email?: string;
+      position?: string;
+      source: string;
+      budget?: string;
+      budgetAmount?: number;
+      observations?: string;
+      chatId?: string;
+      assignedAgentId?: string;
+    },
+    historicalDates?: { createdAt: Date; updatedAt: Date },
+  ) {
     if (!data?.contactName?.trim()) {
       throw new BadRequestException('contactName is required');
     }
@@ -72,9 +104,11 @@ export class LeadsService {
           source: data.source,
           budget: data.budget,
           budgetAmount: data.budgetAmount ?? 0,
+          observations: data.observations,
           chatId: data.chatId ?? null,
           assignedAgentId: data.assignedAgentId ?? null,
           leadNumber: `LD-${count + 1}`,
+          ...(historicalDates ?? {}),
         },
         include: { Agent: true, Chat: true },
       });
@@ -94,6 +128,7 @@ export class LeadsService {
       source?: string;
       budget?: string;
       budgetAmount?: number;
+      observations?: string;
       hasPendingTasks?: boolean;
       chatId?: string | null;
     },

@@ -223,6 +223,9 @@ model Lead {
   budgetAmount    Decimal   @default(0) @db.Decimal(12, 2)
   stage           LeadStage @default(contacto_inicial)
   hasPendingTasks Boolean   @default(false)
+  // LYD-12: reemplaza el concepto de "Nota 1..5" de imports historicos
+  // (ej. Kommo) -- un solo campo de texto libre, no una lista.
+  observations    String?   @db.Text
   Chat            Chat?     @relation(fields: [chatId], references: [id])
   chatId          String?   @unique
   Agent           Agent?    @relation(fields: [assignedAgentId], references: [id])

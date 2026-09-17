@@ -14,16 +14,20 @@ import mimeTypes from 'mime-types';
 import path from 'path';
 
 import { BusinessRouter } from './business.router';
+import { CalendarEventsRouter } from './calendar-events.router';
 import { CallRouter } from './call.router';
 import { ChatRouter } from './chat.router';
 import { CrmRouter } from './crm.router';
 import { GroupRouter } from './group.router';
+import { InsightsRouter } from './insights.router';
 import { InstanceRouter } from './instance.router';
 import { LabelRouter } from './label.router';
+import { LeadsRouter } from './leads.router';
 import { ProxyRouter } from './proxy.router';
 import { MessageRouter } from './sendMessage.router';
 import { SettingsRouter } from './settings.router';
 import { TemplateRouter } from './template.router';
+import { TemplateItemsRouter, TemplatesRouter } from './templates.router';
 import { ViewsRouter } from './view.router';
 
 enum HttpStatus {
@@ -229,6 +233,13 @@ router
   // cuelgan de /:instanceName (agentes son globales, conversaciones se
   // identifican por chatId). Solo requieren el apikey global.
   .use('/crm', authGuard['apikey'], new CrmRouter().router)
+  // LYD-8/9/10/11: mismo criterio que /crm -- globales, sin guards de
+  // instancia, solo apikey.
+  .use('/crm/leads', authGuard['apikey'], new LeadsRouter().router)
+  .use('/crm/calendar-events', authGuard['apikey'], new CalendarEventsRouter().router)
+  .use('/crm/template-groups', authGuard['apikey'], new TemplatesRouter().router)
+  .use('/crm/templates', authGuard['apikey'], new TemplateItemsRouter().router)
+  .use('/crm/insights', authGuard['apikey'], new InsightsRouter().router)
   .use('', new ChannelRouter(configService, ...guards).router)
   .use('', new EventRouter(configService, ...guards).router)
   .use('', new ChatbotRouter(...guards).router)

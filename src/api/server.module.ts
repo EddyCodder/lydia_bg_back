@@ -4,16 +4,20 @@ import { eventEmitter } from '@config/event.config';
 import { Logger } from '@config/logger.config';
 
 import { BusinessController } from './controllers/business.controller';
+import { CalendarEventsController } from './controllers/calendar-events.controller';
 import { CallController } from './controllers/call.controller';
 import { ChatController } from './controllers/chat.controller';
 import { CrmController } from './controllers/crm.controller';
 import { GroupController } from './controllers/group.controller';
+import { InsightsController } from './controllers/insights.controller';
 import { InstanceController } from './controllers/instance.controller';
 import { LabelController } from './controllers/label.controller';
+import { LeadsController } from './controllers/leads.controller';
 import { ProxyController } from './controllers/proxy.controller';
 import { SendMessageController } from './controllers/sendMessage.controller';
 import { SettingsController } from './controllers/settings.controller';
 import { TemplateController } from './controllers/template.controller';
+import { TemplatesController } from './controllers/templates.controller';
 import { ChannelController } from './integrations/channel/channel.controller';
 import { EvolutionController } from './integrations/channel/evolution/evolution.controller';
 import { MetaController } from './integrations/channel/meta/meta.controller';
@@ -41,11 +45,15 @@ import { S3Service } from './integrations/storage/s3/services/s3.service';
 import { ProviderFiles } from './provider/sessions';
 import { PrismaRepository } from './repository/repository.service';
 import { CacheService } from './services/cache.service';
+import { CalendarEventsService } from './services/calendar-events.service';
 import { CrmService } from './services/crm.service';
+import { InsightsService } from './services/insights.service';
+import { LeadsService } from './services/leads.service';
 import { WAMonitoringService } from './services/monitor.service';
 import { ProxyService } from './services/proxy.service';
 import { SettingsService } from './services/settings.service';
 import { TemplateService } from './services/template.service';
+import { TemplatesService } from './services/templates.service';
 
 const logger = new Logger('WA MODULE');
 
@@ -91,6 +99,18 @@ export const settingsController = new SettingsController(settingsService);
 
 const crmService = new CrmService(prismaRepository);
 export const crmController = new CrmController(crmService);
+
+const leadsService = new LeadsService(prismaRepository);
+export const leadsController = new LeadsController(leadsService);
+
+const calendarEventsService = new CalendarEventsService(prismaRepository);
+export const calendarEventsController = new CalendarEventsController(calendarEventsService);
+
+const templatesService = new TemplatesService(prismaRepository);
+export const templatesController = new TemplatesController(templatesService);
+
+const insightsService = new InsightsService(prismaRepository);
+export const insightsController = new InsightsController(insightsService);
 
 export const instanceController = new InstanceController(
   waMonitor,

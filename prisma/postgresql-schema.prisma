@@ -74,6 +74,25 @@ enum AgentRole {
   administrador
 }
 
+// LYD-8: pipeline de ventas de Lydia (leads), antes 100% mock en
+// lydia_bg_front. Etapas fijas del embudo comercial.
+enum LeadStage {
+  contacto_inicial
+  negociacion
+  promesa_pago
+  discusion_contrato
+  matriculado
+  venta_perdida
+}
+
+// LYD-9: tipo de evento en el calendario por agente.
+enum CalendarEventType {
+  chat
+  nota
+  tarea
+  reserva
+}
+
 model Instance {
   id                      String                   @id @default(cuid())
   name                    String                   @unique @db.VarChar(255)
@@ -151,6 +170,8 @@ model Chat {
   Agent           Agent?             @relation(fields: [assignedAgentId], references: [id])
   assignedAgentId String?
   Note            ConversationNote[]
+  // LYD-8: a lo sumo un lead de pipeline por conversacion.
+  Lead            Lead?
 
   @@unique([instanceId, remoteJid])
   @@index([instanceId])
@@ -168,8 +189,10 @@ model Agent {
   createdAt DateTime  @default(now()) @db.Timestamp
   updatedAt DateTime  @updatedAt @db.Timestamp
 
-  Chat Chat[]
-  Note ConversationNote[]
+  Chat          Chat[]
+  Note          ConversationNote[]
+  Lead          Lead[]
+  CalendarEvent CalendarEvent[]
 }
 
 model ConversationNote {
@@ -182,6 +205,79 @@ model ConversationNote {
   createdAt DateTime @default(now()) @db.Timestamp
 
   @@index([chatId])
+}
+
+// LYD-8: lead de pipeline comercial. Vinculado 1:1 opcional a una
+// conversacion (Chat) -- un lead puede existir antes de que haya
+// conversacion de WhatsApp (ej. carga manual) o quedar sin vincular.
+model Lead {
+  id              String    @id @default(cuid())
+  leadNumber      String    @unique
+  contactName     String    @db.VarChar(100)
+  company         String?   @db.VarChar(100)
+  phone           String?   @db.VarChar(50)
+  email           String?   @db.VarChar(255)
+  position        String?   @db.VarChar(100)
+  source          String    @db.VarChar(50)
+  budget          String?   @db.VarChar(50)
+  budgetAmount    Decimal   @default(0) @db.Decimal(12, 2)
+  stage           LeadStage @default(contacto_inicial)
+  hasPendingTasks Boolean   @default(false)
+  Chat            Chat?     @relation(fields: [chatId], references: [id])
+  chatId          String?   @unique
+  Agent           Agent?    @relation(fields: [assignedAgentId], references: [id])
+  assignedAgentId String?
+  createdAt       DateTime  @default(now()) @db.Timestamp
+  updatedAt       DateTime  @updatedAt @db.Timestamp
+
+  CalendarEvent CalendarEvent[]
+
+  @@index([stage])
+  @@index([assignedAgentId])
+}
+
+// LYD-9: evento de calendario por agente (chat agendado, nota, tarea o
+// reserva). `completed` distingue tareas abiertas de cerradas -- no existe
+// en el tipo mock del frontend, se agrega junto con este modelo.
+model CalendarEvent {
+  id        String            @id @default(cuid())
+  type      CalendarEventType
+  Lead      Lead?             @relation(fields: [leadId], references: [id])
+  leadId    String?
+  Agent     Agent?            @relation(fields: [agentId], references: [id])
+  agentId   String?
+  startAt   DateTime
+  endAt     DateTime
+  note      String            @db.Text
+  completed Boolean           @default(false)
+  createdAt DateTime          @default(now()) @db.Timestamp
+  updatedAt DateTime          @updatedAt @db.Timestamp
+
+  @@index([agentId])
+  @@index([leadId])
+  @@index([startAt])
+}
+
+// LYD-10: plantillas de respuesta rapida del composer, agrupadas.
+model TemplateGroup {
+  id        String               @id @default(cuid())
+  title     String               @db.VarChar(100)
+  Templates QuickReplyTemplate[]
+  createdAt DateTime             @default(now()) @db.Timestamp
+  updatedAt DateTime             @updatedAt @db.Timestamp
+}
+
+model QuickReplyTemplate {
+  id            String        @id @default(cuid())
+  TemplateGroup TemplateGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId       String
+  command       String        @db.VarChar(50)
+  label         String        @db.VarChar(100)
+  body          String        @db.Text
+  createdAt     DateTime      @default(now()) @db.Timestamp
+  updatedAt     DateTime      @updatedAt @db.Timestamp
+
+  @@unique([groupId, command])
 }
 
 model Contact {

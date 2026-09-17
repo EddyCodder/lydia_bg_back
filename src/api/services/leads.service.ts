@@ -1,0 +1,129 @@
+import { PrismaRepository } from '@api/repository/repository.service';
+import { BadRequestException, NotFoundException } from '@exceptions';
+import { LeadStage } from '@prisma/client';
+
+// LYD-8: pipeline de ventas de Lydia. Lead es su propia entidad (no una
+// extension de Chat) porque puede existir sin conversacion de WhatsApp
+// todavia (carga manual, ver Lead.chatId opcional en el schema).
+export class LeadsService {
+  constructor(private readonly prisma: PrismaRepository) {}
+
+  public async listLeads(params: { stage?: LeadStage; assignedAgentId?: string; source?: string }) {
+    const { stage, assignedAgentId, source } = params;
+    return this.prisma.lead.findMany({
+      where: {
+        ...(stage ? { stage } : {}),
+        ...(assignedAgentId ? { assignedAgentId } : {}),
+        ...(source ? { source } : {}),
+      },
+      include: { Agent: true, Chat: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  public async getLead(id: string) {
+    return this.assertLeadExists(id);
+  }
+
+  public async createLead(data: {
+    contactName: string;
+    company?: string;
+    phone?: string;
+    email?: string;
+    position?: string;
+    source: string;
+    budget?: string;
+    budgetAmount?: number;
+    chatId?: string;
+    assignedAgentId?: string;
+  }) {
+    if (!data?.contactName?.trim()) {
+      throw new BadRequestException('contactName is required');
+    }
+    if (!data?.source?.trim()) {
+      throw new BadRequestException('source is required');
+    }
+
+    if (data.assignedAgentId) {
+      const agent = await this.prisma.agent.findUnique({ where: { id: data.assignedAgentId } });
+      if (!agent) {
+        throw new BadRequestException(`Agent "${data.assignedAgentId}" not found`);
+      }
+    }
+    if (data.chatId) {
+      const chat = await this.prisma.chat.findUnique({ where: { id: data.chatId } });
+      if (!chat) {
+        throw new BadRequestException(`Chat "${data.chatId}" not found`);
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // No hay secuencia nativa para un id de texto (cuid) -- generamos el
+      // consecutivo dentro de la misma transaccion que el insert para
+      // evitar que dos creaciones concurrentes pisen el mismo numero.
+      const count = await tx.lead.count();
+      return tx.lead.create({
+        data: {
+          contactName: data.contactName,
+          company: data.company,
+          phone: data.phone,
+          email: data.email,
+          position: data.position,
+          source: data.source,
+          budget: data.budget,
+          budgetAmount: data.budgetAmount ?? 0,
+          chatId: data.chatId ?? null,
+          assignedAgentId: data.assignedAgentId ?? null,
+          leadNumber: `LD-${count + 1}`,
+        },
+        include: { Agent: true, Chat: true },
+      });
+    });
+  }
+
+  public async updateLead(
+    id: string,
+    data: {
+      stage?: LeadStage;
+      assignedAgentId?: string | null;
+      contactName?: string;
+      company?: string;
+      phone?: string;
+      email?: string;
+      position?: string;
+      source?: string;
+      budget?: string;
+      budgetAmount?: number;
+      hasPendingTasks?: boolean;
+      chatId?: string | null;
+    },
+  ) {
+    await this.assertLeadExists(id);
+
+    if (data.assignedAgentId) {
+      const agent = await this.prisma.agent.findUnique({ where: { id: data.assignedAgentId } });
+      if (!agent) {
+        throw new BadRequestException(`Agent "${data.assignedAgentId}" not found`);
+      }
+    }
+
+    return this.prisma.lead.update({
+      where: { id },
+      data,
+      include: { Agent: true, Chat: true },
+    });
+  }
+
+  public async deleteLead(id: string) {
+    await this.assertLeadExists(id);
+    await this.prisma.lead.delete({ where: { id } });
+  }
+
+  private async assertLeadExists(id: string) {
+    const lead = await this.prisma.lead.findUnique({ where: { id }, include: { Agent: true, Chat: true } });
+    if (!lead) {
+      throw new NotFoundException(`Lead "${id}" not found`);
+    }
+    return lead;
+  }
+}

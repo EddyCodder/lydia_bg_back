@@ -20,7 +20,10 @@ export class CrmController {
     return this.crmService.getConversation(chatId);
   }
 
-  public async updateConversation(chatId: string, data: { status?: ChatStatus; assignedAgentId?: string | null }) {
+  public async updateConversation(
+    chatId: string,
+    data: { status?: ChatStatus; assignedAgentId?: string | null; unreadMessages?: number },
+  ) {
     return this.crmService.updateConversation(chatId, data);
   }
 

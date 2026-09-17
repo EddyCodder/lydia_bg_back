@@ -106,7 +106,10 @@ export class CrmService {
     return { ...chat, contact: contact ?? null };
   }
 
-  public async updateConversation(chatId: string, data: { status?: ChatStatus; assignedAgentId?: string | null }) {
+  public async updateConversation(
+    chatId: string,
+    data: { status?: ChatStatus; assignedAgentId?: string | null; unreadMessages?: number },
+  ) {
     await this.assertChatExists(chatId);
 
     if (data.assignedAgentId) {
@@ -114,6 +117,14 @@ export class CrmService {
       if (!agent) {
         throw new BadRequestException(`Agent "${data.assignedAgentId}" not found`);
       }
+    }
+
+    // unreadMessages es de Evolution API (Chat.unreadMessages), no algo propio
+    // de CRM -- lo unico que necesita el frontend es poder ponerlo en 0 al
+    // abrir la conversacion (LYD-13). No se expone para setearlo a cualquier
+    // valor arbitrario.
+    if (data.unreadMessages !== undefined && data.unreadMessages !== 0) {
+      throw new BadRequestException('unreadMessages solo puede setearse a 0');
     }
 
     return this.prisma.chat.update({

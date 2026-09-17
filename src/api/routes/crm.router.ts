@@ -37,8 +37,10 @@ export class CrmRouter {
         return res.json(await crmController.getConversation(req.params.chatId));
       })
       .patch('/conversations/:chatId', async (req, res) => {
-        const { status, assignedAgentId } = req.body ?? {};
-        return res.json(await crmController.updateConversation(req.params.chatId, { status, assignedAgentId }));
+        const { status, assignedAgentId, unreadMessages } = req.body ?? {};
+        return res.json(
+          await crmController.updateConversation(req.params.chatId, { status, assignedAgentId, unreadMessages }),
+        );
       })
       .get('/conversations/:chatId/notes', async (req, res) => {
         return res.json(await crmController.listNotes(req.params.chatId));

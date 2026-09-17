@@ -243,4 +243,4 @@ Apache 2.0 + condición adicional: si Evolution API se usa como parte de un sist
 
 ## Flujo
 
-Igual que el resto del ecosistema Brittany: ningún cambio de código sin ticket `CRM-` primero (ver `docs_ragnargroup/flujo_desarrollo.md` y el `CLAUDE.md` del workspace).
+Igual que el resto del ecosistema Brittany: ningún cambio de código sin ticket primero (ver `docs_ragnargroup/flujo_desarrollo.md` y el `CLAUDE.md` del workspace). El prefijo de este proyecto es `LYD-` (visto por primera vez 2026-09-17, LYD-1..LYD-12) -- `CRM-` (hasta CRM-12) queda solo como referencia histórica de tickets ya cerrados.

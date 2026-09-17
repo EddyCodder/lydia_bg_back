@@ -1,21 +1,18 @@
 /**
- * LYD-3: sanitiza y mapea el export de leads/contactos de Kommo (CRM que Lydia
- * reemplaza) contra el modelo actual de lydia_bg_back (Chat/Contact/Agent,
- * schema CRM-12). Solo analisis y limpieza -- no escribe en ninguna base de
- * datos. La carga real espera la version final del export (LYD-3 trabaja
- * sobre la provisional del 2026-09-16).
+ * LYD-3/LYD-12: sanitiza y mapea el export de leads/contactos de Kommo (CRM
+ * que Lydia reemplaza) contra el modelo Lead real de lydia_bg_back (LYD-8).
+ * Solo genera el CSV de carga -- no escribe en ninguna base de datos. La
+ * carga real espera la version final del export (este script corre sobre
+ * la provisional del 2026-09-16).
  *
  * Uso:
  *   npx tsx scripts/kommo/clean-contacts.ts --input <ruta-al-xlsx>
  *   npx tsx scripts/kommo/clean-contacts.ts   (usa ./kommo_export_contacts.xlsx si existe)
  *
- * Salida (todas gitignored, ver .gitignore): tres CSV junto al input:
- *   <input>.limpio.csv      -- filas importables, columnas mapeadas
- *   <input>.revisar.csv     -- de las importables, solo las que quedan con
- *                               algun flag (ver FLAGS) para revision manual
- *   <input>.descartadas.csv -- filas SIN_LEAD (decision del negocio, LYD-3:
- *                               no se cargan) -- se guardan aparte, no se
- *                               pierden silenciosamente
+ * Salida (gitignored, ver .gitignore): un solo CSV junto al input,
+ * <input>.limpio.csv, con columnas 1:1 contra el modelo Lead (mas
+ * remoteJid/telefonoPais/usuarioResponsable/modificadoPor/flags, que son
+ * ayuda para el import real o para auditoria, no campos de Lead).
  *
  * xlsx@0.18.5 (npm) tiene advisories de prototype-pollution/ReDoS sin fix
  * publicado en el registro (SheetJS solo lo distribuye por su propio CDN).
@@ -51,10 +48,17 @@ const DROPPED_COLUMNS = [
   'Página web (compañía)',
 ] as const;
 
-// Columnas que sí tienen datos pero todavía no tienen destino en el modelo
-// actual (Chat/Contact/Agent) ni en lo que define LYD-1 para leads/pipeline.
-// Se conservan en el CSV limpio para no perderlas, marcadas como pendientes.
-const PENDING_MAPPING_COLUMNS = ['Etiquetas', 'Nota 1', 'Nota 2', 'Nota 3', 'Nota 4', 'Nota 5'] as const;
+const NOTE_COLUMNS = ['Nota 1', 'Nota 2', 'Nota 3', 'Nota 4', 'Nota 5'] as const;
+
+// Decision del negocio (LYD-12): "Etiquetas" casi no tiene dato (12/5388
+// filas) pero Lead.source es obligatorio -- las filas sin etiqueta quedan
+// con este valor fijo en vez de romper la carga.
+const DEFAULT_SOURCE = 'Kommo (sin fuente registrada)';
+
+// Lead.source es VARCHAR(50) en el schema -- ninguna Etiquetas del export
+// provisional se acerca a este limite (la mas larga son 21 caracteres), pero
+// el export final del 18/09 podria traer combinaciones mas largas.
+const SOURCE_MAX_LENGTH = 50;
 
 // Mapeo manual de "Usuario responsable" (Kommo) -> Agent real de lydia_bg_back
 // (decidido con el negocio, LYD-3). Los valores de Kommo no son logins de
@@ -99,20 +103,24 @@ interface RawRow {
   [key: string]: string | undefined;
 }
 
+// Columnas 1:1 contra el modelo Lead (LYD-8 + observations de LYD-12), mas
+// unas pocas de apoyo para el import real o auditoria (no son campos de
+// Lead): kommoContactId, remoteJid, telefonoPais, usuarioResponsable,
+// modificadoPor, flags.
 interface CleanRow {
-  id: string;
-  nombre: string;
+  kommoContactId: string;
+  contactName: string;
+  phone: string;
   remoteJid: string;
   telefonoPais: string;
-  leadId: string;
-  usuarioResponsable: string;
-  agentId: string;
+  source: string;
+  assignedAgentId: string;
   agentNombre: string;
+  usuarioResponsable: string;
   modificadoPor: string;
-  fechaCreacion: string;
-  fechaModificacion: string;
-  etiquetas: string;
-  notas: string;
+  createdAt: string;
+  updatedAt: string;
+  observations: string;
   flags: string;
 }
 
@@ -136,10 +144,8 @@ function stripExcelTextQuote(value: string): string {
   return value.startsWith("'") ? value.slice(1) : value;
 }
 
-function extractLeadId(value: string | undefined): string {
-  if (!value) return '';
-  const m = value.match(/Lead #(\d+)/);
-  return m ? m[1] : '';
+function hasLead(value: string | undefined): boolean {
+  return !!value && /Lead #\d+/.test(value);
 }
 
 function main() {
@@ -168,10 +174,11 @@ function main() {
     const usuarioResponsable = (row['Usuario responsable'] || '').trim();
     const modificadoPor = (row['Modificado por'] || '').trim();
     const telefonoRaw = row['Teléfono oficina'] ? stripExcelTextQuote(row['Teléfono oficina'].trim()) : '';
-    const leadId = extractLeadId(row['Leads']);
+    const kommoContactId = row['ID'];
 
     let remoteJid = '';
     let telefonoPais = '';
+    let phone = '';
     if (!telefonoRaw) {
       flags.push('SIN_TELEFONO');
     } else {
@@ -187,22 +194,30 @@ function main() {
         // corresponder a un WhatsApp real; el flag queda para revisarlo.
         const digits = telefonoRaw.replace(/\D/g, '');
         if (digits) remoteJid = `${digits}@s.whatsapp.net`;
+        phone = telefonoRaw;
       } else {
         remoteJid = `${parsed.number.replace('+', '')}@s.whatsapp.net`;
         telefonoPais = parsed.country || '';
+        phone = parsed.number;
         if (telefonoPais !== 'PE') {
           flags.push('TELEFONO_NO_PERU');
         }
       }
     }
 
+    // Decision del negocio (LYD-12): sin Nombre, usar el telefono como
+    // contactName (Lead.contactName es obligatorio) aunque quede duplicado
+    // con Lead.phone. Si tampoco hay telefono (13 filas), usar el ID de
+    // Kommo como ultimo recurso -- el negocio no cubrio este caso limite.
+    let contactName = nombre;
     if (!nombre) {
       flags.push('NOMBRE_VACIO');
+      contactName = phone || `Contacto Kommo #${kommoContactId}`;
     } else if (/^\d+$/.test(nombre)) {
       flags.push('NOMBRE_NUMERICO');
     }
 
-    if (!leadId) {
+    if (!hasLead(row['Leads'])) {
       flags.push('SIN_LEAD');
     }
 
@@ -215,66 +230,62 @@ function main() {
       flags.push('SIN_MAPEO_AGENTE');
     }
 
+    const rawEtiquetas = (row['Etiquetas'] || '').trim();
+    if (!rawEtiquetas) flags.push('SIN_ETIQUETA');
+    let source = rawEtiquetas || DEFAULT_SOURCE;
+    if (source.length > SOURCE_MAX_LENGTH) {
+      flags.push('SOURCE_TRUNCADO');
+      source = source.slice(0, SOURCE_MAX_LENGTH);
+    }
+
     for (const f of flags) {
       flagCounts[f] = (flagCounts[f] || 0) + 1;
     }
 
-    const notas = PENDING_MAPPING_COLUMNS.filter((c) => c.startsWith('Nota'))
-      .map((c) => (row[c] || '').trim())
+    const observations = NOTE_COLUMNS.map((c) => (row[c] || '').trim())
       .filter(Boolean)
       .join(' | ');
 
     cleaned.push({
-      id: row['ID'],
-      nombre,
+      kommoContactId,
+      contactName,
+      phone,
       remoteJid,
       telefonoPais,
-      leadId,
-      usuarioResponsable,
-      agentId: agent?.id || '',
+      source,
+      assignedAgentId: agent?.id || '',
       agentNombre: agent?.nombre || '',
+      usuarioResponsable,
       modificadoPor,
-      fechaCreacion: parseKommoDate(row['Fecha de Creación']),
-      fechaModificacion: parseKommoDate(row['Fecha de Modificación']),
-      etiquetas: (row['Etiquetas'] || '').trim(),
-      notas,
+      createdAt: parseKommoDate(row['Fecha de Creación']),
+      updatedAt: parseKommoDate(row['Fecha de Modificación']),
+      observations,
       flags: flags.join(';'),
     });
   }
 
   // Decision del negocio (LYD-3): las filas sin lead vinculado no se cargan
   // (varias son claramente spam/basura, y sin lead no hay con que
-  // contrastarlas). Se separan en su propio CSV en vez de borrarlas sin
-  // dejar rastro.
-  const descartadas = cleaned.filter((r) => r.flags.includes('SIN_LEAD'));
+  // contrastarlas).
   const importables = cleaned.filter((r) => !r.flags.includes('SIN_LEAD'));
+  const descartadasCount = cleaned.length - importables.length;
 
   const outBase = inputPath.replace(/\.xlsx$/i, '');
   const cleanedPath = `${outBase}.limpio.csv`;
-  const reviewPath = `${outBase}.revisar.csv`;
-  const discardedPath = `${outBase}.descartadas.csv`;
-
   writeCsv(cleanedPath, importables);
-  writeCsv(
-    reviewPath,
-    importables.filter((r) => r.flags),
-  );
-  writeCsv(discardedPath, descartadas);
 
   console.log(`Filas procesadas: ${rows.length}`);
-  console.log(`Descartadas (SIN_LEAD, no se cargan): ${descartadas.length}`);
+  console.log(`Descartadas (SIN_LEAD, no se cargan, no quedan en el CSV): ${descartadasCount}`);
   console.log(`Columnas descartadas (siempre/casi siempre vacias, sin info nueva): ${DROPPED_COLUMNS.length}`);
-  console.log(`Columnas sin destino en el modelo actual, conservadas igual: ${PENDING_MAPPING_COLUMNS.join(', ')}`);
-  console.log('\nFlags (una fila puede tener mas de uno):');
+  console.log('\nFlags (una fila puede tener mas de uno, informativos -- ninguno bloquea la carga):');
   for (const [flag, count] of Object.entries(flagCounts).sort((a, b) => b[1] - a[1])) {
     console.log(`  ${flag.padEnd(24)} ${count}`);
   }
-  const conAgente = importables.filter((r) => r.agentId).length;
-  console.log(`\nUsuario responsable resuelto contra Agent real: ${conAgente}/${importables.length} filas importables`);
-  console.log('(AGENT_MAP en este script -- los 5 valores de Kommo con dato quedan mapeados)');
-  console.log(`\nEscrito: ${cleanedPath} (${importables.length} filas)`);
-  console.log(`Escrito: ${reviewPath} (${importables.filter((r) => r.flags).length} filas para revision manual)`);
-  console.log(`Escrito: ${discardedPath} (${descartadas.length} filas, no se cargan)`);
+  const conAgente = importables.filter((r) => r.assignedAgentId).length;
+  const conEtiqueta = importables.filter((r) => r.source !== DEFAULT_SOURCE).length;
+  console.log(`\nassignedAgentId resuelto: ${conAgente}/${importables.length} filas`);
+  console.log(`source con dato real de Kommo (resto usa el default "${DEFAULT_SOURCE}"): ${conEtiqueta}/${importables.length}`);
+  console.log(`\nEscrito: ${cleanedPath} (${importables.length} filas, listo para cargar contra Lead)`);
 }
 
 function writeCsv(filePath: string, rows: CleanRow[]) {
@@ -283,8 +294,8 @@ function writeCsv(filePath: string, rows: CleanRow[]) {
     return;
   }
   const headers = Object.keys(rows[0]) as (keyof CleanRow)[];
-  // Estos CSV se abren a mano en Excel para revisar filas flageadas: un valor
-  // que empiece con = + - @ (ej. un telefono pegado en una Nota) se
+  // Este CSV se puede abrir a mano en Excel para auditoria: un valor que
+  // empiece con = + - @ (ej. un telefono pegado en una nota) se
   // interpretaria como formula. Se neutraliza con una comilla simple, igual
   // que hace Excel al exportar el telefono original de Kommo.
   const escape = (v: string) => {

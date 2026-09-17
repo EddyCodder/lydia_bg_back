@@ -73,11 +73,11 @@ const AGENT_MAP: Record<string, { id: string; nombre: string }> = {
   // de referencia igual que hizo con Bustamante.
   centro: { id: 'agent_cveliz', nombre: 'Cynthia Veliz Fernandini' },
   cayma: { id: 'agent_vrivera', nombre: 'Yoxsana Valentina Rivera Molina' },
-  // "Brittany Miraflores" queda sin mapear a proposito: la sede Miraflores
-  // no tiene NINGUNA asesora activa en el SGA hoy (solo Rosi Lara, inactiva
-  // -- coincide con el valor "Rosy" que aparecia sin match en "Modificado
-  // por"). No hay a quien asignarselo todavia.
-  // 'brittany miraflores': { id: '???', nombre: '???' },
+  // Miraflores no tiene ninguna asesora activa en el SGA (solo Rosi Lara,
+  // inactiva -- coincide con el valor "Rosy" sin match en "Modificado por").
+  // El negocio eligio a Maria del Pilar Angles Garcia (admin de esa sede en
+  // el SGA, no asesora) como responsable de referencia mientras tanto.
+  'brittany miraflores': { id: 'agent_pilar', nombre: 'María del Pilar Angles García' },
 };
 
 interface RawRow {
@@ -271,8 +271,7 @@ function main() {
   }
   const conAgente = importables.filter((r) => r.agentId).length;
   console.log(`\nUsuario responsable resuelto contra Agent real: ${conAgente}/${importables.length} filas importables`);
-  console.log('(AGENT_MAP en este script -- Mafer, Bustamante, Centro y Cayma confirmados;');
-  console.log('Brittany Miraflores sigue sin mapeo, ver SIN_MAPEO_AGENTE y comentarios en AGENT_MAP)');
+  console.log('(AGENT_MAP en este script -- los 5 valores de Kommo con dato quedan mapeados)');
   console.log(`\nEscrito: ${cleanedPath} (${importables.length} filas)`);
   console.log(`Escrito: ${reviewPath} (${importables.filter((r) => r.flags).length} filas para revision manual)`);
   console.log(`Escrito: ${discardedPath} (${descartadas.length} filas, no se cargan)`);

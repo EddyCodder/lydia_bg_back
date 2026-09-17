@@ -52,6 +52,28 @@ const DROPPED_COLUMNS = [
 // Se conservan en el CSV limpio para no perderlas, marcadas como pendientes.
 const PENDING_MAPPING_COLUMNS = ['Etiquetas', 'Nota 1', 'Nota 2', 'Nota 3', 'Nota 4', 'Nota 5'] as const;
 
+// Mapeo manual de "Usuario responsable" (Kommo) -> Agent real de lydia_bg_back
+// (decidido con el negocio, LYD-3). Los valores de Kommo no son logins de
+// Lydia: "Mafer" es apodo de una de las dos Maria Fernanda del equipo, y el
+// resto son nombres de sede -- cuando una sede tiene mas de un asesora y no
+// se puede diferenciar por fila, se usa una asesora de referencia fija.
+// Comparacion case-insensitive sobre el valor ya recortado (trim).
+const AGENT_MAP: Record<string, { id: string; nombre: string }> = {
+  mafer: { id: 'agent_mmaturrano', nombre: 'María Fernanda Maturano Evangelista' },
+  bustamante: { id: 'agent_pkasparette', nombre: 'Pierina Kasparette Melgar' },
+  // Pendiente de confirmar (LYD-3): "Lince" -> Maria Fernanda Maturano y
+  // "Umacollo" -> Polet Ccope Ccencho son las asesoras de referencia que dio
+  // el negocio, pero esos nombres de sede no aparecen tal cual en el export
+  // -- lo que si aparece es "Centro" y "Cayma". Falta confirmar si son la
+  // misma sede (Centro=Lince, Cayma=Umacollo) antes de activar estas dos
+  // lineas. Ver nota en el ticket.
+  // centro: { id: 'agent_mmaturrano', nombre: 'María Fernanda Maturano Evangelista' }, // si Centro = Lince
+  // cayma: { id: 'agent_pccope', nombre: 'Polet Ccope Ccencho' }, // si Cayma = Umacollo
+  // Pendiente de confirmar (LYD-3): falta el nombre de la asesora de
+  // Miraflores para completar esta linea.
+  // 'brittany miraflores': { id: '???', nombre: '???' },
+};
+
 interface RawRow {
   ID: string;
   Tipo: string;
@@ -78,12 +100,19 @@ interface CleanRow {
   telefonoPais: string;
   leadId: string;
   usuarioResponsable: string;
+  agentId: string;
+  agentNombre: string;
   modificadoPor: string;
   fechaCreacion: string;
   fechaModificacion: string;
   etiquetas: string;
   notas: string;
   flags: string;
+}
+
+function resolveAgent(usuarioResponsable: string): { id: string; nombre: string } | null {
+  if (!usuarioResponsable) return null;
+  return AGENT_MAP[usuarioResponsable.toLowerCase()] || null;
 }
 
 // Kommo exporta fechas como "DD.MM.YYYY HH:mm:ss" en hora de Lima.
@@ -169,6 +198,11 @@ function main() {
       flags.push('NOMBRE_IGUAL_RESPONSABLE');
     }
 
+    const agent = resolveAgent(usuarioResponsable);
+    if (usuarioResponsable && !agent) {
+      flags.push('SIN_MAPEO_AGENTE');
+    }
+
     for (const f of flags) {
       flagCounts[f] = (flagCounts[f] || 0) + 1;
     }
@@ -185,6 +219,8 @@ function main() {
       telefonoPais,
       leadId,
       usuarioResponsable,
+      agentId: agent?.id || '',
+      agentNombre: agent?.nombre || '',
       modificadoPor,
       fechaCreacion: parseKommoDate(row['Fecha de Creación']),
       fechaModificacion: parseKommoDate(row['Fecha de Modificación']),
@@ -211,9 +247,10 @@ function main() {
   for (const [flag, count] of Object.entries(flagCounts).sort((a, b) => b[1] - a[1])) {
     console.log(`  ${flag.padEnd(24)} ${count}`);
   }
-  console.log(`\nUsuario responsable / Modificado por: NO tienen match directo contra Agent.name`);
-  console.log('(tabla Agent de lydia_bg_back en prod, verificada por SSH) -- son nombres/sedes propios');
-  console.log('de Kommo. Requiere una tabla de mapeo manual antes de asignar Chat.assignedAgentId.');
+  const conAgente = cleaned.filter((r) => r.agentId).length;
+  console.log(`\nUsuario responsable resuelto contra Agent real: ${conAgente}/${rows.length} filas`);
+  console.log('(AGENT_MAP en este script -- Mafer y Bustamante confirmados; Centro, Cayma y');
+  console.log('Brittany Miraflores siguen sin mapeo, ver SIN_MAPEO_AGENTE y comentarios en AGENT_MAP)');
   console.log(`\nEscrito: ${cleanedPath}`);
   console.log(`Escrito: ${reviewPath} (${cleaned.filter((r) => r.flags).length} filas para revision manual)`);
 }

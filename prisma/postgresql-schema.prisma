@@ -69,6 +69,11 @@ enum ChatStatus {
   resolved
 }
 
+enum AgentRole {
+  asesor
+  administrador
+}
+
 model Instance {
   id                      String                   @id @default(cuid())
   name                    String                   @unique @db.VarChar(255)
@@ -154,13 +159,14 @@ model Chat {
 }
 
 model Agent {
-  id        String   @id @default(cuid())
-  name      String   @db.VarChar(100)
-  email     String?  @unique @db.VarChar(255)
-  color     String?  @db.VarChar(20)
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now()) @db.Timestamp
-  updatedAt DateTime @updatedAt @db.Timestamp
+  id        String    @id @default(cuid())
+  name      String    @db.VarChar(100)
+  email     String?   @unique @db.VarChar(255)
+  color     String?   @db.VarChar(20)
+  role      AgentRole @default(asesor)
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @db.Timestamp
+  updatedAt DateTime  @updatedAt @db.Timestamp
 
   Chat Chat[]
   Note ConversationNote[]

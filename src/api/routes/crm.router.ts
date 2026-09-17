@@ -2,7 +2,7 @@ import 'express-async-errors';
 
 import { crmController } from '@api/server.module';
 import { BadRequestException } from '@exceptions';
-import { ChatStatus } from '@prisma/client';
+import { AgentRole, ChatStatus } from '@prisma/client';
 import { Router } from 'express';
 
 // CRM-12: capa de agentes/asignacion/notas para el frontend de Lydia
@@ -19,8 +19,8 @@ export class CrmRouter {
         return res.json(await crmController.listAgents());
       })
       .post('/agents', async (req, res) => {
-        const { name, email, color } = req.body ?? {};
-        return res.status(201).json(await crmController.createAgent({ name, email, color }));
+        const { name, email, color, role } = req.body ?? {};
+        return res.status(201).json(await crmController.createAgent({ name, email, color, role: role as AgentRole }));
       })
       .get('/conversations', async (req, res) => {
         const { instanceName, status, assignedAgentId } = req.query as {

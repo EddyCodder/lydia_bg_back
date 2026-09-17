@@ -1,6 +1,6 @@
 import { PrismaRepository } from '@api/repository/repository.service';
 import { BadRequestException, NotFoundException } from '@exceptions';
-import { ChatStatus } from '@prisma/client';
+import { AgentRole, ChatStatus } from '@prisma/client';
 
 // CRM-12: capa de agentes humanos sobre las conversaciones de WhatsApp que
 // ya persiste Evolution API (Chat/Contact/Message). No reimplementa nada de
@@ -16,7 +16,7 @@ export class CrmService {
     });
   }
 
-  public async createAgent(data: { name: string; email?: string; color?: string }) {
+  public async createAgent(data: { name: string; email?: string; color?: string; role?: AgentRole }) {
     if (!data?.name) {
       throw new BadRequestException('name is required');
     }
@@ -54,11 +54,42 @@ export class CrmService {
         })
       : [];
     const contactByJid = new Map(contacts.map((c) => [c.remoteJid, c]));
+    const lastMessageByJid = await this.lastMessageByRemoteJid(instance.id, remoteJids);
 
     return chats.map((chat) => ({
       ...chat,
       contact: contactByJid.get(chat.remoteJid) ?? null,
+      lastMessage: lastMessageByJid.get(chat.remoteJid) ?? null,
     }));
+  }
+
+  // Message.key es JSON (no hay columna remoteJid propia) -- no hay forma de
+  // pedirle a Prisma "el mas nuevo por remoteJid" en una sola query sin SQL
+  // crudo. Con el volumen de mensajes de una instancia nueva esto alcanza;
+  // si el historial crece mucho, esto se vuelve candidato a reemplazar por
+  // un SELECT DISTINCT ON (key->>'remoteJid') ... ORDER BY messageTimestamp
+  // DESC con indice dedicado.
+  private async lastMessageByRemoteJid(instanceId: string, remoteJids: string[]) {
+    const result = new Map<string, { content: string; timestamp: number }>();
+    if (!remoteJids.length) return result;
+
+    const messages = await this.prisma.message.findMany({
+      where: {
+        instanceId,
+        OR: remoteJids.map((remoteJid) => ({ key: { path: ['remoteJid'], equals: remoteJid } })),
+      },
+      orderBy: { messageTimestamp: 'desc' },
+      select: { key: true, message: true, messageTimestamp: true },
+    });
+
+    for (const m of messages) {
+      const remoteJid = (m.key as { remoteJid?: string })?.remoteJid;
+      if (!remoteJid || result.has(remoteJid)) continue; // ya ordenado desc: el primero que aparece es el mas nuevo
+      const body = m.message as { conversation?: string; extendedTextMessage?: { text?: string } };
+      const content = body?.conversation ?? body?.extendedTextMessage?.text ?? '';
+      result.set(remoteJid, { content, timestamp: m.messageTimestamp });
+    }
+    return result;
   }
 
   public async getConversation(chatId: string) {

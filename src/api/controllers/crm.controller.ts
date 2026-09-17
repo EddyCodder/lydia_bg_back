@@ -1,5 +1,5 @@
 import { CrmService } from '@api/services/crm.service';
-import { ChatStatus } from '@prisma/client';
+import { AgentRole, ChatStatus } from '@prisma/client';
 
 export class CrmController {
   constructor(private readonly crmService: CrmService) {}
@@ -8,7 +8,7 @@ export class CrmController {
     return this.crmService.listAgents();
   }
 
-  public async createAgent(data: { name: string; email?: string; color?: string }) {
+  public async createAgent(data: { name: string; email?: string; color?: string; role?: AgentRole }) {
     return this.crmService.createAgent(data);
   }
 

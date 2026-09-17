@@ -6,6 +6,7 @@ import { Logger } from '@config/logger.config';
 import { BusinessController } from './controllers/business.controller';
 import { CallController } from './controllers/call.controller';
 import { ChatController } from './controllers/chat.controller';
+import { CrmController } from './controllers/crm.controller';
 import { GroupController } from './controllers/group.controller';
 import { InstanceController } from './controllers/instance.controller';
 import { LabelController } from './controllers/label.controller';
@@ -40,6 +41,7 @@ import { S3Service } from './integrations/storage/s3/services/s3.service';
 import { ProviderFiles } from './provider/sessions';
 import { PrismaRepository } from './repository/repository.service';
 import { CacheService } from './services/cache.service';
+import { CrmService } from './services/crm.service';
 import { WAMonitoringService } from './services/monitor.service';
 import { ProxyService } from './services/proxy.service';
 import { SettingsService } from './services/settings.service';
@@ -86,6 +88,9 @@ export const chatwootController = new ChatwootController(chatwootService, config
 
 const settingsService = new SettingsService(waMonitor);
 export const settingsController = new SettingsController(settingsService);
+
+const crmService = new CrmService(prismaRepository);
+export const crmController = new CrmController(crmService);
 
 export const instanceController = new InstanceController(
   waMonitor,

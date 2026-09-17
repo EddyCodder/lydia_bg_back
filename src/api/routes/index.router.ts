@@ -16,6 +16,7 @@ import path from 'path';
 import { BusinessRouter } from './business.router';
 import { CallRouter } from './call.router';
 import { ChatRouter } from './chat.router';
+import { CrmRouter } from './crm.router';
 import { GroupRouter } from './group.router';
 import { InstanceRouter } from './instance.router';
 import { LabelRouter } from './label.router';
@@ -224,6 +225,10 @@ router
   .use('/settings', new SettingsRouter(...guards).router)
   .use('/proxy', new ProxyRouter(...guards).router)
   .use('/label', new LabelRouter(...guards).router)
+  // CRM-12: sin instanceExistsGuard/instanceLoggedGuard -- estas rutas no
+  // cuelgan de /:instanceName (agentes son globales, conversaciones se
+  // identifican por chatId). Solo requieren el apikey global.
+  .use('/crm', authGuard['apikey'], new CrmRouter().router)
   .use('', new ChannelRouter(configService, ...guards).router)
   .use('', new EventRouter(configService, ...guards).router)
   .use('', new ChatbotRouter(...guards).router)

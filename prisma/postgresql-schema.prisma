@@ -60,6 +60,15 @@ enum DifyBotType {
   workflow
 }
 
+// CRM-12: capa de agentes humanos sobre las conversaciones de WhatsApp.
+// Reemplaza lo que daba Chatwoot (asignacion, estado, notas internas) sin
+// duplicar nada que Evolution ya persiste (Chat/Contact/Message).
+enum ChatStatus {
+  open
+  pending
+  resolved
+}
+
 model Instance {
   id                      String                   @id @default(cuid())
   name                    String                   @unique @db.VarChar(255)
@@ -122,19 +131,51 @@ model Session {
 }
 
 model Chat {
-  id             String    @id @default(cuid())
-  remoteJid      String    @db.VarChar(100)
-  name           String?   @db.VarChar(100)
-  labels         Json?     @db.JsonB
-  createdAt      DateTime? @default(now()) @db.Timestamp
-  updatedAt      DateTime? @updatedAt @db.Timestamp
-  Instance       Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  id             String     @id @default(cuid())
+  remoteJid      String     @db.VarChar(100)
+  name           String?    @db.VarChar(100)
+  labels         Json?      @db.JsonB
+  createdAt      DateTime?  @default(now()) @db.Timestamp
+  updatedAt      DateTime?  @updatedAt @db.Timestamp
+  Instance       Instance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   instanceId     String
-  unreadMessages Int       @default(0)
+  unreadMessages Int        @default(0)
+
+  // CRM-12: capa de agentes (no viene de WhatsApp/Baileys, es propia de Lydia)
+  status          ChatStatus         @default(open)
+  Agent           Agent?             @relation(fields: [assignedAgentId], references: [id])
+  assignedAgentId String?
+  Note            ConversationNote[]
 
   @@unique([instanceId, remoteJid])
   @@index([instanceId])
   @@index([remoteJid])
+  @@index([assignedAgentId])
+}
+
+model Agent {
+  id        String   @id @default(cuid())
+  name      String   @db.VarChar(100)
+  email     String?  @unique @db.VarChar(255)
+  color     String?  @db.VarChar(20)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamp
+  updatedAt DateTime @updatedAt @db.Timestamp
+
+  Chat Chat[]
+  Note ConversationNote[]
+}
+
+model ConversationNote {
+  id        String   @id @default(cuid())
+  Chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  chatId    String
+  Agent     Agent?   @relation(fields: [agentId], references: [id])
+  agentId   String?
+  content   String   @db.Text
+  createdAt DateTime @default(now()) @db.Timestamp
+
+  @@index([chatId])
 }
 
 model Contact {

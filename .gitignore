@@ -19,7 +19,10 @@ lerna-debug.log*
 /docker-data
 
 # LYD-3: exports de leads/contactos (datos personales reales, nunca a git)
-kommo_export_contacts.xlsx
+# Cubre tambien re-exports con sufijo de fecha (ej. kommo_export_contacts_2026-09-18_b.xlsx)
+# y las salidas derivadas del script de limpieza (scripts/kommo/clean-contacts.ts).
+kommo_export_contacts*.xlsx
+kommo_export_contacts*.csv
 *.kommo_export.*
 
 # Package

@@ -74,6 +74,18 @@ services:
   frontend:
     build:
       context: ./front
+      # LYD-2: NEXT_PUBLIC_* se inlinean en el bundle del cliente durante
+      # "next build" (corre dentro del Dockerfile) -- tienen que llegar como
+      # build arg, un environment: de runtime (ver mas abajo) no alcanza.
+      # Valores publicos del SDK web de Firebase, no son secretos.
+      args:
+        NEXT_PUBLIC_LYDIA_API_ENABLED: ${NEXT_PUBLIC_LYDIA_API_ENABLED:-false}
+        NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-}
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-}
+        NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:-}
+        NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:-}
+        NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-}
     image: lydia-frontend:prod
     container_name: lydia_frontend
     restart: unless-stopped
@@ -89,6 +101,12 @@ services:
       CHATWOOT_BASE_URL: ${CHATWOOT_BASE_URL:-}
       CHATWOOT_API_TOKEN: ${CHATWOOT_API_TOKEN:-}
       CHATWOOT_ACCOUNT_ID: ${CHATWOOT_ACCOUNT_ID:-}
+      # LYD-2: solo se leen en runtime (Route Handlers), no en el bundle del
+      # cliente -- alcanza con environment de runtime, sin build arg.
+      EVOLUTION_API_URL: ${EVOLUTION_API_URL:-}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
     networks:
       - lydia_internal_net
 

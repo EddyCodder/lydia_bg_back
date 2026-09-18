@@ -22,7 +22,7 @@ import { ChannelStartupService } from '@api/services/channel.service';
 import { Events, wa } from '@api/types/wa.types';
 import { AudioConverter, Chatwoot, ConfigService, Database, Openai, S3, WaBusiness } from '@config/env.config';
 import { BadRequestException, InternalServerErrorException } from '@exceptions';
-import { createJid } from '@utils/createJid';
+import { createJid, extractBsuid } from '@utils/createJid';
 import { status } from '@utils/renderStatus';
 import { sendTelemetry } from '@utils/sendTelemetry';
 import axios from 'axios';
@@ -123,6 +123,26 @@ export class BusinessStartupService extends ChannelStartupService {
     return await this.post(content, 'whatsapp_business_profile');
   }
 
+  // Contacto de un webhook. Meta omite el telefono (`from`, `recipient_id`) cuando el usuario tiene
+  // username y solo manda el BSUID (`from_user_id`, `recipient_user_id`, `contacts[].user_id`).
+  private resolveRemoteJid(content: any): string | undefined {
+    const message = content.messages?.[0];
+    const status = content.statuses?.[0];
+
+    const id = message ? (message.from ?? message.from_user_id) : (status?.recipient_id ?? status?.recipient_user_id);
+
+    const contactId = id ?? content.contacts?.[0]?.wa_id ?? content.contacts?.[0]?.user_id;
+
+    return contactId ? createJid(contactId) : undefined;
+  }
+
+  // Meta acepta `to` (telefono) o `recipient` (BSUID) segun lo que se conozca del contacto.
+  private recipientField(number: string): { to: string } | { recipient: string } {
+    const bsuid = extractBsuid(number);
+
+    return bsuid ? { recipient: bsuid } : { to: number.replace(/\D/g, '') };
+  }
+
   public async connectToWhatsapp(data?: any): Promise<any> {
     if (!data) return;
 
@@ -131,9 +151,18 @@ export class BusinessStartupService extends ChannelStartupService {
     try {
       this.loadChatwoot();
 
-      this.eventHandler(content);
+      const remoteJid = this.resolveRemoteJid(content);
 
-      this.phoneNumber = createJid(content.messages ? content.messages[0].from : content.statuses[0]?.recipient_id);
+      if (!remoteJid) {
+        this.logger.warn('Webhook de Meta sin identificador de contacto (ni telefono ni BSUID), se ignora');
+        return;
+      }
+
+      // El contacto viaja como parametro: el campo de instancia lo pisaria otro webhook concurrente
+      // (o quedaria con el valor del evento anterior si este no trae contacto).
+      this.phoneNumber = remoteJid;
+
+      this.eventHandler(content, remoteJid);
     } catch (error) {
       this.logger.error(error);
       throw new InternalServerErrorException(error?.toString());
@@ -382,19 +411,20 @@ export class BusinessStartupService extends ChannelStartupService {
     return messageType;
   }
 
-  protected async messageHandle(received: any, database: Database, settings: any) {
+  protected async messageHandle(received: any, database: Database, settings: any, remoteJid?: string) {
     try {
       let messageRaw: any;
-      let pushName: any;
 
-      if (received.contacts) pushName = received.contacts[0].profile.name;
+      // Los contactos de estados y los usuarios con username pueden venir sin `profile` o sin `name`.
+      const profile = received.contacts?.[0]?.profile;
+      const pushName: any = profile?.name ?? profile?.username;
 
       if (received.messages) {
         const message = received.messages[0]; // Añadir esta línea para definir message
 
         const key = {
           id: message.id,
-          remoteJid: this.phoneNumber,
+          remoteJid,
           fromMe: message.from === received.metadata.phone_number_id,
         };
 
@@ -701,8 +731,9 @@ export class BusinessStartupService extends ChannelStartupService {
           where: { instanceId: this.instanceId, remoteJid: key.remoteJid },
         });
 
+        // `profile.phone` no existe en los webhooks de Meta (el contacto se identifica con el jid ya resuelto).
         const contactRaw: any = {
-          remoteJid: received.contacts[0].profile.phone,
+          remoteJid: key.remoteJid,
           pushName,
           // profilePicUrl: '',
           instanceId: this.instanceId,
@@ -714,7 +745,7 @@ export class BusinessStartupService extends ChannelStartupService {
 
         if (contact) {
           const contactRaw: any = {
-            remoteJid: received.contacts[0].profile.phone,
+            remoteJid: key.remoteJid,
             pushName,
             // profilePicUrl: '',
             instanceId: this.instanceId,
@@ -730,8 +761,9 @@ export class BusinessStartupService extends ChannelStartupService {
             );
           }
 
+          // Acotado a la instancia: un mismo cliente puede escribirle a mas de un numero de la empresa.
           await this.prismaRepository.contact.updateMany({
-            where: { remoteJid: contact.remoteJid },
+            where: { remoteJid: contact.remoteJid, instanceId: this.instanceId },
             data: contactRaw,
           });
           return;
@@ -739,7 +771,7 @@ export class BusinessStartupService extends ChannelStartupService {
 
         this.sendDataWebhook(Events.CONTACTS_UPSERT, contactRaw);
 
-        this.prismaRepository.contact.create({
+        await this.prismaRepository.contact.create({
           data: contactRaw,
         });
       }
@@ -747,8 +779,8 @@ export class BusinessStartupService extends ChannelStartupService {
         for await (const item of received.statuses) {
           const key = {
             id: item.id,
-            remoteJid: this.phoneNumber,
-            fromMe: this.phoneNumber === received.metadata.phone_number_id,
+            remoteJid,
+            fromMe: remoteJid === received.metadata.phone_number_id,
           };
           if (settings?.groups_ignore && key.remoteJid.includes('@g.us')) {
             return;
@@ -893,7 +925,7 @@ export class BusinessStartupService extends ChannelStartupService {
     return message;
   }
 
-  protected async eventHandler(content: any) {
+  protected async eventHandler(content: any, remoteJid?: string) {
     try {
       // Registro para depuración
       this.logger.log('Contenido recibido en eventHandler:');
@@ -922,13 +954,13 @@ export class BusinessStartupService extends ChannelStartupService {
           message.type === 'reaction'
         ) {
           // Procesar el mensaje normalmente
-          this.messageHandle(content, database, settings);
+          this.messageHandle(content, database, settings, remoteJid);
         } else {
           this.logger.warn(`Tipo de mensaje no reconocido: ${message.type}`);
         }
       } else if (content.statuses) {
         // Procesar actualizaciones de estado
-        this.messageHandle(content, database, settings);
+        this.messageHandle(content, database, settings, remoteJid);
       } else {
         this.logger.warn('No se encontraron mensajes ni estados en el contenido recibido');
       }
@@ -964,7 +996,7 @@ export class BusinessStartupService extends ChannelStartupService {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
             type: 'reaction',
-            to: number.replace(/\D/g, ''),
+            ...this.recipientField(number),
             reaction: {
               message_id: message['reactionMessage']['key']['id'],
               emoji: message['reactionMessage']['text'],
@@ -978,7 +1010,7 @@ export class BusinessStartupService extends ChannelStartupService {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
             type: 'location',
-            to: number.replace(/\D/g, ''),
+            ...this.recipientField(number),
             location: {
               longitude: message['locationMessage']['degreesLongitude'],
               latitude: message['locationMessage']['degreesLatitude'],
@@ -994,7 +1026,7 @@ export class BusinessStartupService extends ChannelStartupService {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
             type: 'contacts',
-            to: number.replace(/\D/g, ''),
+            ...this.recipientField(number),
             contacts: message['contacts'],
           };
           quoted ? (content.context = { message_id: quoted.id }) : content;
@@ -1006,7 +1038,7 @@ export class BusinessStartupService extends ChannelStartupService {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
             type: 'text',
-            to: number.replace(/\D/g, ''),
+            ...this.recipientField(number),
             text: {
               body: message['conversation'],
               preview_url: Boolean(options?.linkPreview),
@@ -1022,7 +1054,7 @@ export class BusinessStartupService extends ChannelStartupService {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
             type: message['mediaType'],
-            to: number.replace(/\D/g, ''),
+            ...this.recipientField(number),
             [message['mediaType']]: {
               [message['type']]: message['id'],
               ...(message['mediaType'] !== 'audio' &&
@@ -1040,7 +1072,7 @@ export class BusinessStartupService extends ChannelStartupService {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
             type: 'audio',
-            to: number.replace(/\D/g, ''),
+            ...this.recipientField(number),
             audio: {
               [message['type']]: message['id'],
             },
@@ -1052,7 +1084,7 @@ export class BusinessStartupService extends ChannelStartupService {
           content = {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
-            to: number.replace(/\D/g, ''),
+            ...this.recipientField(number),
             type: 'interactive',
             interactive: {
               type: 'button',
@@ -1076,7 +1108,7 @@ export class BusinessStartupService extends ChannelStartupService {
           content = {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
-            to: number.replace(/\D/g, ''),
+            ...this.recipientField(number),
             type: 'interactive',
             interactive: {
               type: 'list',
@@ -1111,7 +1143,7 @@ export class BusinessStartupService extends ChannelStartupService {
           content = {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
-            to: number.replace(/\D/g, ''),
+            ...this.recipientField(number),
             type: 'template',
             template: {
               name: message['template']['name'],

@@ -32,7 +32,27 @@ function formatBRNumber(jid: string) {
   }
 }
 
+// BSUID de Meta (business-scoped user ID): pais ISO + "." + hasta 128 alfanumericos,
+// con "ENT." intermedio si es un parent BSUID (ej. "PE.2972498289765446").
+const BSUID_REGEX = /^[A-Za-z]{2}\.(?:ENT\.)?[A-Za-z0-9]{1,128}$/;
+
+export function isBsuid(id?: string): boolean {
+  return typeof id === 'string' && BSUID_REGEX.test(id);
+}
+
+// Devuelve el BSUID si `value` es uno (a secas o como "<bsuid>@lid"), o null si es un telefono/jid normal.
+export function extractBsuid(value?: string): string | null {
+  if (typeof value !== 'string') return null;
+  const id = value.split('@')[0];
+  return isBsuid(id) ? id : null;
+}
+
 export function createJid(number: string): string {
+  // Los usuarios de WhatsApp con username llegan sin telefono, solo con BSUID: se usa como jid tipo lid.
+  if (isBsuid(number)) {
+    return `${number}@lid`;
+  }
+
   number = number.replace(/:\d+/, '');
 
   if (number.includes('@g.us') || number.includes('@s.whatsapp.net') || number.includes('@lid')) {

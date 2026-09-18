@@ -1,6 +1,7 @@
 import { PrismaRepository } from '@api/repository/repository.service';
 import { BadRequestException, NotFoundException } from '@exceptions';
 import { AgentRole, ChatStatus } from '@prisma/client';
+import { status as messageStatus } from '@utils/renderStatus';
 
 // CRM-12: capa de agentes humanos sobre las conversaciones de WhatsApp que
 // ya persiste Evolution API (Chat/Contact/Message). No reimplementa nada de
@@ -116,7 +117,7 @@ export class CrmService {
       contactPhoneOverride?: string | null;
     },
   ) {
-    await this.assertChatExists(chatId);
+    const chat = await this.assertChatExists(chatId);
 
     if (data.assignedAgentId) {
       const agent = await this.prisma.agent.findUnique({ where: { id: data.assignedAgentId } });
@@ -131,6 +132,23 @@ export class CrmService {
     // valor arbitrario.
     if (data.unreadMessages !== undefined && data.unreadMessages !== 0) {
       throw new BadRequestException('unreadMessages solo puede setearse a 0');
+    }
+
+    // Chat.unreadMessages no es la fuente de verdad -- whatsapp.baileys.service
+    // (updateChatUnreadMessages) lo recalcula de cero contando Message.status
+    // = DELIVERY_ACK cada vez que llega un mensaje nuevo. Poner solo el
+    // contador en 0 sin tocar el status de los mensajes hacia que el badge
+    // volviera a "resucitar" con todos los mensajes viejos + el nuevo en
+    // cuanto entraba cualquier mensaje siguiente (bug reportado en LYD-13).
+    if (data.unreadMessages === 0) {
+      await this.prisma.$executeRaw`
+        UPDATE "Message"
+        SET "status" = ${messageStatus[4]}
+        WHERE "instanceId" = ${chat.instanceId}
+        AND "key"->>'remoteJid' = ${chat.remoteJid}
+        AND ("key"->>'fromMe')::boolean = false
+        AND ("status" IS NULL OR "status" = ${messageStatus[3]})
+      `;
     }
 
     // LYD-14: string vacio limpia el override (vuelve a mostrar el nombre/

@@ -149,6 +149,15 @@ services:
       # `frontend`/`lydia_bg_back` en vez de una base de Chatwoot.
       CHATWOOT_ENABLED: "false"
 
+      # Canal WhatsApp Cloud API (Meta). TOKEN_WEBHOOK es el "token de
+      # verificacion" que se carga en Meta -> WhatsApp -> Configuracion ->
+      # Webhooks; sin definirlo el codigo cae al default publico "evolution".
+      WA_BUSINESS_TOKEN_WEBHOOK: ${WA_BUSINESS_TOKEN_WEBHOOK}
+      # App Secret de la app de Meta: si esta definido, POST /webhook/meta exige X-Hub-Signature-256 valida.
+      WA_BUSINESS_APP_SECRET: ${WA_BUSINESS_APP_SECRET:-}
+      WA_BUSINESS_VERSION: ${WA_BUSINESS_VERSION:-v23.0}
+      WA_BUSINESS_LANGUAGE: ${WA_BUSINESS_LANGUAGE:-es}
+
       CONFIG_SESSION_PHONE_CLIENT: "Brittany Chat"
       CONFIG_SESSION_PHONE_NAME: Chrome
     volumes:

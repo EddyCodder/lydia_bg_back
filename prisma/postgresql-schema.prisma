@@ -170,6 +170,13 @@ model Chat {
   Agent           Agent?             @relation(fields: [assignedAgentId], references: [id])
   assignedAgentId String?
   Note            ConversationNote[]
+  // LYD-14: override manual de nombre/telefono del contacto, propio de Lydia
+  // -- Contact.pushName y Chat.name los pisa Baileys en cada sync de WhatsApp
+  // (nickname/tag en vez de numero, o vacio), asi que no sirven para que un
+  // agente le ponga un nombre reconocible al contacto. Nulo = usar el valor
+  // nativo de siempre (ver adaptContact en el frontend).
+  contactNameOverride  String? @db.VarChar(100)
+  contactPhoneOverride String? @db.VarChar(30)
   // LYD-8: a lo sumo un lead de pipeline por conversacion.
   Lead            Lead?
 

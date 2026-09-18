@@ -108,7 +108,13 @@ export class CrmService {
 
   public async updateConversation(
     chatId: string,
-    data: { status?: ChatStatus; assignedAgentId?: string | null; unreadMessages?: number },
+    data: {
+      status?: ChatStatus;
+      assignedAgentId?: string | null;
+      unreadMessages?: number;
+      contactNameOverride?: string | null;
+      contactPhoneOverride?: string | null;
+    },
   ) {
     await this.assertChatExists(chatId);
 
@@ -125,6 +131,15 @@ export class CrmService {
     // valor arbitrario.
     if (data.unreadMessages !== undefined && data.unreadMessages !== 0) {
       throw new BadRequestException('unreadMessages solo puede setearse a 0');
+    }
+
+    // LYD-14: string vacio limpia el override (vuelve a mostrar el nombre/
+    // numero nativo de WhatsApp), no se guarda como "".
+    if (data.contactNameOverride !== undefined) {
+      data.contactNameOverride = data.contactNameOverride?.trim() || null;
+    }
+    if (data.contactPhoneOverride !== undefined) {
+      data.contactPhoneOverride = data.contactPhoneOverride?.trim() || null;
     }
 
     return this.prisma.chat.update({

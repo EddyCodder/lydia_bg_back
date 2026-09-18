@@ -22,7 +22,13 @@ export class CrmController {
 
   public async updateConversation(
     chatId: string,
-    data: { status?: ChatStatus; assignedAgentId?: string | null; unreadMessages?: number },
+    data: {
+      status?: ChatStatus;
+      assignedAgentId?: string | null;
+      unreadMessages?: number;
+      contactNameOverride?: string | null;
+      contactPhoneOverride?: string | null;
+    },
   ) {
     return this.crmService.updateConversation(chatId, data);
   }

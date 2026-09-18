@@ -189,6 +189,7 @@ export type Websocket = {
 
 export type WaBusiness = {
   TOKEN_WEBHOOK: string;
+  APP_SECRET: string;
   URL: string;
   VERSION: string;
   LANGUAGE: string;
@@ -726,6 +727,7 @@ export class ConfigService {
       },
       WA_BUSINESS: {
         TOKEN_WEBHOOK: process.env.WA_BUSINESS_TOKEN_WEBHOOK || 'evolution',
+        APP_SECRET: process.env.WA_BUSINESS_APP_SECRET || '',
         URL: process.env.WA_BUSINESS_URL || 'https://graph.facebook.com',
         VERSION: process.env.WA_BUSINESS_VERSION || 'v18.0',
         LANGUAGE: process.env.WA_BUSINESS_LANGUAGE || 'en',

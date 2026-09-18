@@ -4,7 +4,7 @@ import { LeadStage } from '@prisma/client';
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
-  public async listLeads(query: { stage?: LeadStage; assignedAgentId?: string; source?: string }) {
+  public async listLeads(query: { stage?: LeadStage; assignedAgentId?: string; source?: string; chatId?: string }) {
     return this.leadsService.listLeads(query);
   }
 

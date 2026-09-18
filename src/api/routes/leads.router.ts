@@ -13,12 +13,13 @@ export class LeadsRouter {
   constructor() {
     this.router
       .get('/', async (req, res) => {
-        const { stage, assignedAgentId, source } = req.query as {
+        const { stage, assignedAgentId, source, chatId } = req.query as {
           stage?: LeadStage;
           assignedAgentId?: string;
           source?: string;
+          chatId?: string;
         };
-        return res.json(await leadsController.listLeads({ stage, assignedAgentId, source }));
+        return res.json(await leadsController.listLeads({ stage, assignedAgentId, source, chatId }));
       })
       .post('/', async (req, res) => {
         return res.status(201).json(await leadsController.createLead(req.body ?? {}));

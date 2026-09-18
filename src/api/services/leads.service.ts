@@ -8,13 +8,16 @@ import { LeadStage } from '@prisma/client';
 export class LeadsService {
   constructor(private readonly prisma: PrismaRepository) {}
 
-  public async listLeads(params: { stage?: LeadStage; assignedAgentId?: string; source?: string }) {
-    const { stage, assignedAgentId, source } = params;
+  public async listLeads(params: { stage?: LeadStage; assignedAgentId?: string; source?: string; chatId?: string }) {
+    const { stage, assignedAgentId, source, chatId } = params;
     return this.prisma.lead.findMany({
       where: {
         ...(stage ? { stage } : {}),
         ...(assignedAgentId ? { assignedAgentId } : {}),
         ...(source ? { source } : {}),
+        // LYD-20: Lead.chatId es @unique -- a lo sumo un resultado, sirve
+        // para saber si esta conversacion ya tiene un lead de pipeline.
+        ...(chatId ? { chatId } : {}),
       },
       include: { Agent: true, Chat: true },
       orderBy: { createdAt: 'desc' },

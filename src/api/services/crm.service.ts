@@ -87,10 +87,23 @@ export class CrmService {
       const remoteJid = (m.key as { remoteJid?: string })?.remoteJid;
       if (!remoteJid || result.has(remoteJid)) continue; // ya ordenado desc: el primero que aparece es el mas nuevo
       const body = m.message as { conversation?: string; extendedTextMessage?: { text?: string } };
-      const content = body?.conversation ?? body?.extendedTextMessage?.text ?? '';
+      const content = body?.conversation ?? body?.extendedTextMessage?.text ?? this.mediaPreviewLabel(m.message);
       result.set(remoteJid, { content, timestamp: m.messageTimestamp });
     }
     return result;
+  }
+
+  // LYD-15: sin esto, un mensaje que es solo una foto/audio/documento (sin
+  // texto) mostraba el preview de "Ultimo mensaje" vacio en la lista de
+  // conversaciones.
+  private mediaPreviewLabel(message: unknown): string {
+    const body = message as Record<string, unknown>;
+    if (body?.imageMessage) return 'Foto';
+    if (body?.videoMessage) return 'Video';
+    if (body?.audioMessage) return 'Audio';
+    if (body?.documentMessage) return 'Documento';
+    if (body?.stickerMessage) return 'Sticker';
+    return '';
   }
 
   public async getConversation(chatId: string) {

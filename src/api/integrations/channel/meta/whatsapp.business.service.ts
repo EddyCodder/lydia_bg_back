@@ -838,11 +838,22 @@ export class BusinessStartupService extends ChannelStartupService {
               instanceId: this.instanceId,
             };
 
-            this.sendDataWebhook(Events.MESSAGES_UPDATE, message);
+            // Meta puede reenviar el mismo estado (LYD-24): cada (mensaje, estado) se registra y notifica una sola vez.
+            const alreadyRecorded = await this.prismaRepository.messageUpdate.findFirst({
+              where: { messageId: message.messageId, instanceId: this.instanceId, status: message.status },
+              select: { id: true },
+            });
+
+            if (alreadyRecorded) {
+              this.logger.log(`Estado ${message.status} repetido para ${key.id}, se ignora`);
+              continue;
+            }
 
             await this.prismaRepository.messageUpdate.create({
               data: message,
             });
+
+            this.sendDataWebhook(Events.MESSAGES_UPDATE, message);
 
             if (findMessage.webhookUrl) {
               await axios.post(findMessage.webhookUrl, message);

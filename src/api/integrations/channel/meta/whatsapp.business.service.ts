@@ -143,6 +143,31 @@ export class BusinessStartupService extends ChannelStartupService {
     return bsuid ? { recipient: bsuid } : { to: number.replace(/\D/g, '') };
   }
 
+  // El inbox del CRM (/crm/conversations) lista la tabla Chat, que solo creaban Baileys y el canal Evolution:
+  // sin esto las conversaciones de Cloud API no aparecian (LYD-28). El contador de no leidos se recalcula como
+  // en Baileys: entrantes en DELIVERY_ACK (el CRM los pasa a READ al abrir la conversacion).
+  private async touchChat(remoteJid: string, name?: string) {
+    try {
+      const unread: { count: number }[] = await this.prismaRepository.$queryRaw`
+        SELECT COUNT(*)::int AS count FROM "Message"
+        WHERE "instanceId" = ${this.instanceId}
+        AND "key"->>'remoteJid' = ${remoteJid}
+        AND ("key"->>'fromMe')::boolean = false
+        AND "status" = ${status[3]}
+      `;
+      const unreadMessages = unread[0]?.count ?? 0;
+      const chatName = name?.slice(0, 100);
+
+      await this.prismaRepository.chat.upsert({
+        where: { instanceId_remoteJid: { instanceId: this.instanceId, remoteJid } },
+        create: { remoteJid, instanceId: this.instanceId, name: chatName, unreadMessages },
+        update: { unreadMessages, ...(chatName ? { name: chatName } : {}) },
+      });
+    } catch (error) {
+      this.logger.error(`No se pudo actualizar el Chat de ${remoteJid}: ${error}`);
+    }
+  }
+
   public async connectToWhatsapp(data?: any): Promise<any> {
     if (!data) return;
 
@@ -694,6 +719,9 @@ export class BusinessStartupService extends ChannelStartupService {
           // await this.client.readMessages([received.key]);
         }
 
+        // Entrantes: DELIVERY_ACK = "sin leer" para el CRM (igual que Baileys; ver markRead en crm.service).
+        if (!key.fromMe) messageRaw.status = status[3];
+
         this.logger.log(messageRaw);
 
         sendTelemetry(`received.message.${messageRaw.messageType ?? 'unknown'}`);
@@ -726,6 +754,8 @@ export class BusinessStartupService extends ChannelStartupService {
             data: messageRaw,
           });
         }
+
+        await this.touchChat(key.remoteJid, pushName);
 
         const contact = await this.prismaRepository.contact.findFirst({
           where: { instanceId: this.instanceId, remoteJid: key.remoteJid },
@@ -1209,6 +1239,8 @@ export class BusinessStartupService extends ChannelStartupService {
       await this.prismaRepository.message.create({
         data: messageRaw,
       });
+
+      await this.touchChat(messageRaw.key.remoteJid);
 
       return messageRaw;
     } catch (error) {

@@ -138,7 +138,12 @@ export class InstanceController {
       let webhookWaBusiness = null,
         accessTokenWaBusiness = '';
 
-      if (instanceData.integration === Integration.WHATSAPP_BUSINESS) {
+      if (
+        instanceData.integration === Integration.WHATSAPP_BUSINESS ||
+        instanceData.integration === Integration.FACEBOOK_MESSENGER ||
+        instanceData.integration === Integration.INSTAGRAM
+      ) {
+        // WhatsApp: phone_number_id. Messenger: id de la Pagina. Instagram: id de la cuenta profesional.
         if (!instanceData.number) {
           throw new BadRequestException('number is required');
         }

@@ -154,4 +154,7 @@ export const Integration = {
   WHATSAPP_BUSINESS: 'WHATSAPP-BUSINESS',
   WHATSAPP_BAILEYS: 'WHATSAPP-BAILEYS',
   EVOLUTION: 'EVOLUTION',
+  // LYD-26: canales de Meta distintos de WhatsApp. `number` de la instancia = id de la Pagina / cuenta de Instagram.
+  FACEBOOK_MESSENGER: 'FACEBOOK-MESSENGER',
+  INSTAGRAM: 'INSTAGRAM',
 };

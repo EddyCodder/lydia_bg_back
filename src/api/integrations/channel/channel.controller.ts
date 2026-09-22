@@ -9,6 +9,7 @@ import { BadRequestException } from '@exceptions';
 import EventEmitter2 from 'eventemitter2';
 
 import { EvolutionStartupService } from './evolution/evolution.channel.service';
+import { MetaSocialStartupService } from './meta/meta.social.service';
 import { BusinessStartupService } from './meta/whatsapp.business.service';
 import { BaileysStartupService } from './whatsapp/whatsapp.baileys.service';
 
@@ -52,8 +53,21 @@ export class ChannelController {
   }
 
   public init(instanceData: InstanceDto, data: ChannelDataType) {
-    if (!instanceData.token && instanceData.integration === Integration.WHATSAPP_BUSINESS) {
+    const isMetaSocial =
+      instanceData.integration === Integration.FACEBOOK_MESSENGER || instanceData.integration === Integration.INSTAGRAM;
+
+    if (!instanceData.token && (instanceData.integration === Integration.WHATSAPP_BUSINESS || isMetaSocial)) {
       throw new BadRequestException('token is required');
+    }
+
+    if (isMetaSocial) {
+      return new MetaSocialStartupService(
+        data.configService,
+        data.eventEmitter,
+        data.prismaRepository,
+        data.cache,
+        data.chatwootCache,
+      );
     }
 
     if (instanceData.integration === Integration.WHATSAPP_BUSINESS) {

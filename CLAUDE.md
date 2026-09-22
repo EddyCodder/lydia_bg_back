@@ -244,3 +244,13 @@ Apache 2.0 + condición adicional: si Evolution API se usa como parte de un sist
 ## Flujo
 
 Igual que el resto del ecosistema Brittany: ningún cambio de código sin ticket primero (ver `docs_ragnargroup/flujo_desarrollo.md` y el `CLAUDE.md` del workspace). El prefijo de este proyecto es `LYD-` (visto por primera vez 2026-09-17, LYD-1..LYD-12) -- `CRM-` (hasta CRM-12) queda solo como referencia histórica de tickets ya cerrados.
+
+## Canales de Meta distintos de WhatsApp (LYD-26)
+
+Facebook Messenger (`integration: FACEBOOK-MESSENGER`) e Instagram DM (`INSTAGRAM`) son instancias como las de WhatsApp Cloud API, servidas por `MetaSocialStartupService` (`src/api/integrations/channel/meta/meta.social.service.ts`). Crear una instancia: `POST /instance/create` con `integration`, `number` = id de la Pagina (Messenger) o de la cuenta profesional de Instagram (es el `entry.id` que Meta manda en el webhook) y `token` = access token de la Pagina (permisos `pages_messaging`, `pages_manage_metadata`, `instagram_manage_messages`).
+
+- Webhook: el mismo `POST /webhook/meta` de WhatsApp (misma verificacion de firma `X-Hub-Signature-256`). `MetaController` enruta por `object`: `page` -> Messenger, `instagram` -> Instagram, y dentro por `entry.id` -> `Instance.number`. En la app de Meta hay que suscribir los objetos `page` e `instagram` a esa URL, con los campos `messages`, `message_echoes`, `message_reads` y `message_deliveries`.
+- `remoteJid` = `<PSID|IGSID>@messenger` / `<IGSID>@instagram`. No hay telefono: el contacto solo tiene id de usuario de Meta.
+- Se guardan en las mismas tablas (`Message`, `Chat`, `Contact`) que WhatsApp, asi que el inbox de `/crm/conversations?instanceName=...` los lista igual.
+- Envio por `/message/sendText` y `/message/sendMedia`. Fuera de la ventana de 24 h Meta rechaza el envio y el error llega tal cual al CRM. Instagram solo acepta adjuntos como URL publica (no soporta subir archivos); Messenger sube el archivo con la Attachment Upload API.
+- Los adjuntos entrantes guardan la URL de la CDN de Meta (expira) y se bajan al pedir `getBase64FromMediaMessage`; no se persisten en S3.

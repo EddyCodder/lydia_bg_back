@@ -29,6 +29,7 @@ import { SettingsRouter } from './settings.router';
 import { TemplateRouter } from './template.router';
 import { TemplateItemsRouter, TemplatesRouter } from './templates.router';
 import { ViewsRouter } from './view.router';
+import { WelcomeMessageRouter } from './welcome-message.router';
 
 enum HttpStatus {
   OK = 200,
@@ -240,6 +241,7 @@ router
   .use('/crm/template-groups', authGuard['apikey'], new TemplatesRouter().router)
   .use('/crm/templates', authGuard['apikey'], new TemplateItemsRouter().router)
   .use('/crm/insights', authGuard['apikey'], new InsightsRouter().router)
+  .use('/crm/welcome-message', authGuard['apikey'], new WelcomeMessageRouter().router)
   .use('', new ChannelRouter(configService, ...guards).router)
   .use('', new EventRouter(configService, ...guards).router)
   .use('', new ChatbotRouter(...guards).router)

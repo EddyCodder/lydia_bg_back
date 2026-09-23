@@ -144,6 +144,7 @@ model Instance {
   N8nSetting              N8nSetting[]
   Evoai                   Evoai[]
   EvoaiSetting            EvoaiSetting?
+  WelcomeMessageConfig    WelcomeMessageConfig?
 }
 
 model Session {
@@ -179,6 +180,10 @@ model Chat {
   contactPhoneOverride String? @db.VarChar(30)
   // LYD-8: a lo sumo un lead de pipeline por conversacion.
   Lead            Lead?
+  // LYD-35: no-nulo una sola vez -- marca que a este chat (numero nuevo, sin
+  // historial previo) ya se le mando el mensaje de bienvenida automatico, para
+  // no repetirlo en mensajes siguientes del mismo remoteJid.
+  welcomeMessageSentAt DateTime? @db.Timestamp
 
   @@unique([instanceId, remoteJid])
   @@index([instanceId])
@@ -435,6 +440,18 @@ model Setting {
   instanceId      String    @unique
 
   @@index([instanceId])
+}
+
+// LYD-35: reemplaza el Salesbot de Kommo -- v1 es deliberadamente simple,
+// solo on/off + texto libre por instancia (sin pasos/ramas/botones).
+model WelcomeMessageConfig {
+  id         String    @id @default(cuid())
+  enabled    Boolean   @default(false) @db.Boolean
+  message    String?   @db.Text
+  createdAt  DateTime? @default(now()) @db.Timestamp
+  updatedAt  DateTime  @updatedAt @db.Timestamp
+  Instance   Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  instanceId String    @unique
 }
 
 model Rabbitmq {

@@ -38,6 +38,11 @@ export class CrmService {
       throw new NotFoundException(`Instance "${instanceName}" not found`);
     }
 
+    // Sin orderBy aca a proposito: Chat.updatedAt es @updatedAt de Prisma, se pisa con
+    // cualquier escritura a la fila -- incluido el PATCH de "marcar como leida" al abrir
+    // la conversacion (unreadMessages: 0). Ordenar por eso hacia que abrir un chat lo
+    // subiera al tope aunque no hubiera mensaje nuevo. El orden real se calcula abajo,
+    // por el timestamp del ultimo mensaje, que solo cambia cuando llega o se envia uno.
     const chats = await this.prisma.chat.findMany({
       where: {
         instanceId: instance.id,
@@ -45,7 +50,6 @@ export class CrmService {
         ...(assignedAgentId ? { assignedAgentId } : {}),
       },
       include: { Agent: true },
-      orderBy: { updatedAt: 'desc' },
     });
 
     const remoteJids = chats.map((c) => c.remoteJid);
@@ -57,11 +61,18 @@ export class CrmService {
     const contactByJid = new Map(contacts.map((c) => [c.remoteJid, c]));
     const lastMessageByJid = await this.lastMessageByRemoteJid(instance.id, remoteJids);
 
-    return chats.map((chat) => ({
-      ...chat,
-      contact: contactByJid.get(chat.remoteJid) ?? null,
-      lastMessage: lastMessageByJid.get(chat.remoteJid) ?? null,
-    }));
+    return chats
+      .map((chat) => ({
+        ...chat,
+        contact: contactByJid.get(chat.remoteJid) ?? null,
+        lastMessage: lastMessageByJid.get(chat.remoteJid) ?? null,
+      }))
+      .sort((a, b) => {
+        // Chats sin ningun mensaje (recien creados, caso raro) van al final por updatedAt.
+        const ta = a.lastMessage?.timestamp ?? Math.floor(a.updatedAt?.getTime() / 1000);
+        const tb = b.lastMessage?.timestamp ?? Math.floor(b.updatedAt?.getTime() / 1000);
+        return tb - ta;
+      });
   }
 
   // Message.key es JSON (no hay columna remoteJid propia) -- no hay forma de

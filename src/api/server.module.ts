@@ -18,6 +18,7 @@ import { SendMessageController } from './controllers/sendMessage.controller';
 import { SettingsController } from './controllers/settings.controller';
 import { TemplateController } from './controllers/template.controller';
 import { TemplatesController } from './controllers/templates.controller';
+import { WelcomeMessageController } from './controllers/welcome-message.controller';
 import { ChannelController } from './integrations/channel/channel.controller';
 import { EvolutionController } from './integrations/channel/evolution/evolution.controller';
 import { MetaController } from './integrations/channel/meta/meta.controller';
@@ -54,6 +55,7 @@ import { ProxyService } from './services/proxy.service';
 import { SettingsService } from './services/settings.service';
 import { TemplateService } from './services/template.service';
 import { TemplatesService } from './services/templates.service';
+import { WelcomeMessageService } from './services/welcome-message.service';
 
 const logger = new Logger('WA MODULE');
 
@@ -111,6 +113,9 @@ export const templatesController = new TemplatesController(templatesService);
 
 const insightsService = new InsightsService(prismaRepository);
 export const insightsController = new InsightsController(insightsService);
+
+const welcomeMessageService = new WelcomeMessageService(prismaRepository);
+export const welcomeMessageController = new WelcomeMessageController(welcomeMessageService);
 
 export const instanceController = new InstanceController(
   waMonitor,

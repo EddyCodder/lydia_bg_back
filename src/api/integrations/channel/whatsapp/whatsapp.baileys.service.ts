@@ -1201,6 +1201,22 @@ export class BaileysStartupService extends ChannelStartupService {
             }
           }
 
+          // LYD-35: numero sin Chat previo -- candidato a mensaje de
+          // bienvenida automatico (solo WhatsApp/Baileys, nunca grupos ni
+          // broadcasts, nunca por mensajes propios). Una reaccion (a un
+          // estado o a un mensaje) no es un mensaje real de conversacion --
+          // sin excluirla, reaccionar a un status ajeno como primer contacto
+          // ya disparaba la bienvenida.
+          if (
+            !existingChat &&
+            !received.key.fromMe &&
+            !received.key.remoteJid.includes('@g.us') &&
+            !received.key.remoteJid.includes('@broadcast') &&
+            !received.message?.reactionMessage
+          ) {
+            await this.sendWelcomeMessageIfEnabled(received.key.remoteJid, received.pushName);
+          }
+
           const messageRaw = this.prepareMessage(received);
 
           if (messageRaw.messageType === 'pollUpdateMessage') {
@@ -2622,6 +2638,59 @@ export class BaileysStartupService extends ChannelStartupService {
     } catch (error) {
       this.logger.error(error);
       throw new BadRequestException(error.toString());
+    }
+  }
+
+  // LYD-35: mensaje de bienvenida automatico, v1. Reclama el envio de forma
+  // atomica (updateMany condicionado a welcomeMessageSentAt: null) para que
+  // dos eventos de Baileys casi simultaneos del mismo remoteJid nunca lo
+  // manden dos veces. El chat.upsert previo solo garantiza que la fila
+  // exista -- se le pasa el pushName para que, si chats.upsert (chatHandle)
+  // corre despues en el mismo lote de eventos, encuentre la fila ya creada
+  // y no pise nada: sin el name aca, esa fila quedaba con name null para
+  // siempre (createMany usa skipDuplicates, no actualiza).
+  private async sendWelcomeMessageIfEnabled(remoteJid: string, pushName?: string | null): Promise<void> {
+    try {
+      const config = await this.prismaRepository.welcomeMessageConfig.findUnique({
+        where: { instanceId: this.instanceId },
+      });
+
+      const message = config?.message?.trim();
+
+      if (!config?.enabled || !message) {
+        return;
+      }
+
+      // Se le pasa el pushName para que, si chats.upsert (chatHandle) corre
+      // despues en el mismo lote de eventos de Baileys, encuentre la fila ya
+      // creada y no la pise (createMany usa skipDuplicates) -- sin esto la
+      // fila quedaba con name null para siempre.
+      await this.prismaRepository.chat.upsert({
+        where: { instanceId_remoteJid: { instanceId: this.instanceId, remoteJid } },
+        create: { instanceId: this.instanceId, remoteJid, name: pushName ?? null },
+        update: {},
+      });
+
+      // Reclamo atomico: dos eventos casi simultaneos del mismo remoteJid
+      // nunca lo manden dos veces.
+      const claim = await this.prismaRepository.chat.updateMany({
+        where: { instanceId: this.instanceId, remoteJid, welcomeMessageSentAt: null },
+        data: { welcomeMessageSentAt: new Date() },
+      });
+
+      if (claim.count === 0) {
+        return;
+      }
+
+      // Si textMessage falla de aca en adelante (socket caido, numero
+      // invalido) no se reintenta en un mensaje siguiente: revertir la marca
+      // no alcanzaria, porque el mensaje actual ya queda persistido como
+      // historial mas abajo en este mismo handler antes de que llegue un
+      // segundo mensaje. Aceptado para v1 -- mejor perder una bienvenida
+      // puntual que mandarla dos veces.
+      await this.textMessage({ number: remoteJid, text: message }, false);
+    } catch (error) {
+      this.logger.error(`Welcome message failed for ${remoteJid} - ${this.instanceId}: ${error}`);
     }
   }
 

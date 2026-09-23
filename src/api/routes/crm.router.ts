@@ -1,7 +1,6 @@
 import 'express-async-errors';
 
 import { crmController } from '@api/server.module';
-import { BadRequestException } from '@exceptions';
 import { AgentRole, ChatStatus } from '@prisma/client';
 import { Router } from 'express';
 
@@ -23,14 +22,12 @@ export class CrmRouter {
         return res.status(201).json(await crmController.createAgent({ name, email, color, role: role as AgentRole }));
       })
       .get('/conversations', async (req, res) => {
+        // LYD-31: instanceName es opcional -- sin el, se listan todos los canales juntos.
         const { instanceName, status, assignedAgentId } = req.query as {
           instanceName?: string;
           status?: ChatStatus;
           assignedAgentId?: string;
         };
-        if (!instanceName) {
-          throw new BadRequestException('instanceName query param is required');
-        }
         return res.json(await crmController.listConversations({ instanceName, status, assignedAgentId }));
       })
       .get('/conversations/:chatId', async (req, res) => {

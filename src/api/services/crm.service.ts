@@ -27,52 +27,67 @@ export class CrmService {
   // Chat y Contact no tienen relacion FK entre si en el schema de Evolution
   // (ambos son unique por [instanceId, remoteJid] pero independientes) --
   // se cruzan a mano aca en vez de duplicar el contacto en una tabla propia.
-  public async listConversations(params: { instanceName: string; status?: ChatStatus; assignedAgentId?: string }) {
+  //
+  // LYD-31: instanceName ahora es opcional -- sin el, se listan las conversaciones
+  // de TODAS las instancias (canales) juntas, mezcladas y ordenadas por ultimo
+  // mensaje. remoteJid solo es unico dentro de una instancia (dos canales podrian
+  // en teoria compartir el mismo valor), asi que contactos y ultimo mensaje se
+  // resuelven por instancia, no en una sola consulta cruzada.
+  public async listConversations(params: { instanceName?: string; status?: ChatStatus; assignedAgentId?: string }) {
     const { instanceName, status, assignedAgentId } = params;
-    if (!instanceName) {
-      throw new BadRequestException('instanceName is required');
+
+    let instances: { id: string; name: string; integration: string }[];
+    if (instanceName) {
+      const instance = await this.prisma.instance.findUnique({ where: { name: instanceName } });
+      if (!instance) {
+        throw new NotFoundException(`Instance "${instanceName}" not found`);
+      }
+      instances = [instance];
+    } else {
+      instances = await this.prisma.instance.findMany();
     }
 
-    const instance = await this.prisma.instance.findUnique({ where: { name: instanceName } });
-    if (!instance) {
-      throw new NotFoundException(`Instance "${instanceName}" not found`);
-    }
+    const byInstance = await Promise.all(
+      instances.map(async (instance) => {
+        // Sin orderBy aca a proposito: Chat.updatedAt es @updatedAt de Prisma, se pisa con
+        // cualquier escritura a la fila -- incluido el PATCH de "marcar como leida" al abrir
+        // la conversacion (unreadMessages: 0). Ordenar por eso hacia que abrir un chat lo
+        // subiera al tope aunque no hubiera mensaje nuevo. El orden real se calcula al final,
+        // por el timestamp del ultimo mensaje, que solo cambia cuando llega o se envia uno.
+        const chats = await this.prisma.chat.findMany({
+          where: {
+            instanceId: instance.id,
+            ...(status ? { status } : {}),
+            ...(assignedAgentId ? { assignedAgentId } : {}),
+          },
+          include: { Agent: true },
+        });
 
-    // Sin orderBy aca a proposito: Chat.updatedAt es @updatedAt de Prisma, se pisa con
-    // cualquier escritura a la fila -- incluido el PATCH de "marcar como leida" al abrir
-    // la conversacion (unreadMessages: 0). Ordenar por eso hacia que abrir un chat lo
-    // subiera al tope aunque no hubiera mensaje nuevo. El orden real se calcula abajo,
-    // por el timestamp del ultimo mensaje, que solo cambia cuando llega o se envia uno.
-    const chats = await this.prisma.chat.findMany({
-      where: {
-        instanceId: instance.id,
-        ...(status ? { status } : {}),
-        ...(assignedAgentId ? { assignedAgentId } : {}),
-      },
-      include: { Agent: true },
+        const remoteJids = chats.map((c) => c.remoteJid);
+        const contacts = remoteJids.length
+          ? await this.prisma.contact.findMany({
+              where: { instanceId: instance.id, remoteJid: { in: remoteJids } },
+            })
+          : [];
+        const contactByJid = new Map(contacts.map((c) => [c.remoteJid, c]));
+        const lastMessageByJid = await this.lastMessageByRemoteJid(instance.id, remoteJids);
+
+        return chats.map((chat) => ({
+          ...chat,
+          instanceName: instance.name,
+          integration: instance.integration,
+          contact: contactByJid.get(chat.remoteJid) ?? null,
+          lastMessage: lastMessageByJid.get(chat.remoteJid) ?? null,
+        }));
+      }),
+    );
+
+    return byInstance.flat().sort((a, b) => {
+      // Chats sin ningun mensaje (recien creados, caso raro) van al final por updatedAt.
+      const ta = a.lastMessage?.timestamp ?? Math.floor(a.updatedAt?.getTime() / 1000);
+      const tb = b.lastMessage?.timestamp ?? Math.floor(b.updatedAt?.getTime() / 1000);
+      return tb - ta;
     });
-
-    const remoteJids = chats.map((c) => c.remoteJid);
-    const contacts = remoteJids.length
-      ? await this.prisma.contact.findMany({
-          where: { instanceId: instance.id, remoteJid: { in: remoteJids } },
-        })
-      : [];
-    const contactByJid = new Map(contacts.map((c) => [c.remoteJid, c]));
-    const lastMessageByJid = await this.lastMessageByRemoteJid(instance.id, remoteJids);
-
-    return chats
-      .map((chat) => ({
-        ...chat,
-        contact: contactByJid.get(chat.remoteJid) ?? null,
-        lastMessage: lastMessageByJid.get(chat.remoteJid) ?? null,
-      }))
-      .sort((a, b) => {
-        // Chats sin ningun mensaje (recien creados, caso raro) van al final por updatedAt.
-        const ta = a.lastMessage?.timestamp ?? Math.floor(a.updatedAt?.getTime() / 1000);
-        const tb = b.lastMessage?.timestamp ?? Math.floor(b.updatedAt?.getTime() / 1000);
-        return tb - ta;
-      });
   }
 
   // Message.key es JSON (no hay columna remoteJid propia) -- no hay forma de
@@ -120,7 +135,7 @@ export class CrmService {
   public async getConversation(chatId: string) {
     const chat = await this.prisma.chat.findUnique({
       where: { id: chatId },
-      include: { Agent: true, Note: { orderBy: { createdAt: 'asc' }, include: { Agent: true } } },
+      include: { Agent: true, Note: { orderBy: { createdAt: 'asc' }, include: { Agent: true } }, Instance: true },
     });
     if (!chat) {
       throw new NotFoundException(`Conversation "${chatId}" not found`);
@@ -128,7 +143,14 @@ export class CrmService {
     const contact = await this.prisma.contact.findFirst({
       where: { instanceId: chat.instanceId, remoteJid: chat.remoteJid },
     });
-    return { ...chat, contact: contact ?? null };
+    // LYD-31: instanceName/integration van sueltos (no solo dentro de Instance) porque
+    // el front los necesita para saber contra que canal mandar los mensajes/media.
+    return {
+      ...chat,
+      instanceName: chat.Instance.name,
+      integration: chat.Instance.integration,
+      contact: contact ?? null,
+    };
   }
 
   public async updateConversation(

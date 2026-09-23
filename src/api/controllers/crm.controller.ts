@@ -12,7 +12,7 @@ export class CrmController {
     return this.crmService.createAgent(data);
   }
 
-  public async listConversations(query: { instanceName: string; status?: ChatStatus; assignedAgentId?: string }) {
+  public async listConversations(query: { instanceName?: string; status?: ChatStatus; assignedAgentId?: string }) {
     return this.crmService.listConversations(query);
   }
 

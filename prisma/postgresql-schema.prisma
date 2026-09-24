@@ -145,6 +145,7 @@ model Instance {
   Evoai                   Evoai[]
   EvoaiSetting            EvoaiSetting?
   WelcomeMessageConfig    WelcomeMessageConfig?
+  BotFlow                 BotFlow?
 }
 
 model Session {
@@ -189,6 +190,8 @@ model Chat {
   // historial de mensajes queda intacto y es reversible. Distinto de
   // "eliminar" (borra el Chat y sus mensajes de verdad, ver crm.service).
   archived Boolean @default(false)
+  // LYD-47: estado del bot de esta conversacion (a lo sumo uno).
+  BotSession BotSession?
 
   @@unique([instanceId, remoteJid])
   @@index([instanceId])
@@ -457,6 +460,43 @@ model WelcomeMessageConfig {
   updatedAt  DateTime  @updatedAt @db.Timestamp
   Instance   Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
   instanceId String    @unique
+}
+
+enum BotSessionStatus {
+  active
+  done
+  handoff
+}
+
+// LYD-47: flujo del bot (reemplaza al mensaje de bienvenida unico). El grafo
+// (nodos mensaje/pregunta + aristas) vive como JSON y se valida entero al
+// guardar (ver bot-flow.validation.ts) -- un solo flujo por instancia.
+model BotFlow {
+  id         String       @id @default(cuid())
+  enabled    Boolean      @default(false) @db.Boolean
+  graph      Json
+  createdAt  DateTime?    @default(now()) @db.Timestamp
+  updatedAt  DateTime     @updatedAt @db.Timestamp
+  Instance   Instance     @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  instanceId String       @unique
+  Sessions   BotSession[]
+}
+
+// LYD-47: donde va el bot con cada conversacion. currentNodeId = pregunta
+// esperando respuesta (null si no hay ninguna pendiente). handoff = el
+// cliente escribio texto libre, el bot se calla y sigue la asesora.
+model BotSession {
+  id            String           @id @default(cuid())
+  Chat          Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  chatId        String           @unique
+  Flow          BotFlow          @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  flowId        String
+  currentNodeId String?          @db.VarChar(64)
+  status        BotSessionStatus @default(active)
+  createdAt     DateTime         @default(now()) @db.Timestamp
+  updatedAt     DateTime         @updatedAt @db.Timestamp
+
+  @@index([flowId])
 }
 
 model Rabbitmq {

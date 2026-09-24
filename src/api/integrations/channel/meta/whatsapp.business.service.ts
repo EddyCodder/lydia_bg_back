@@ -16,7 +16,7 @@ import {
 import * as s3Service from '@api/integrations/storage/s3/libs/minio.server';
 import { ProviderFiles } from '@api/provider/sessions';
 import { PrismaRepository } from '@api/repository/repository.service';
-import { chatbotController } from '@api/server.module';
+import { botService, chatbotController } from '@api/server.module';
 import { CacheService } from '@api/services/cache.service';
 import { ChannelStartupService } from '@api/services/channel.service';
 import { Events, wa } from '@api/types/wa.types';
@@ -772,6 +772,10 @@ export class BusinessStartupService extends ChannelStartupService {
         // propia copia de esta misma logica para el canal QR/no oficial.
         if (!existingChatForWelcome && !key.fromMe && message.type !== 'reaction') {
           await this.sendWelcomeMessageIfEnabled(key.remoteJid, pushName);
+        } else if (existingChatForWelcome && !key.fromMe && message.type !== 'reaction') {
+          // LYD-47: el cliente contesta a un bot ya iniciado (boton) o escribe
+          // texto libre (el bot se calla).
+          await this.botHandleInbound(existingChatForWelcome.id, key.remoteJid, message);
         }
 
         const contact = await this.prismaRepository.contact.findFirst({
@@ -1270,24 +1274,63 @@ export class BusinessStartupService extends ChannelStartupService {
   // LYD-35: mensaje de bienvenida automatico, v1 -- misma logica que
   // whatsapp.baileys.service.ts (duplicada a proposito, mismo criterio que
   // touchChat: cada canal reimplementa su manejo de Chat, no se comparte).
+  // LYD-47: sender del bot por este canal. Los botones son "reply buttons" de
+  // Cloud API (maximo 3, ya validado al guardar el flujo).
+  private botSender(remoteJid: string) {
+    return {
+      sendText: async (text: string) => {
+        await this.textMessage({ number: remoteJid, text }, false);
+      },
+      sendButtons: async (body: string, buttons: { id: string; title: string }[]) => {
+        await this.buttonMessage({
+          number: remoteJid,
+          title: body,
+          buttons: buttons.map((b) => ({ type: 'reply', displayText: b.title, id: b.id })),
+        } as SendButtonsDto);
+      },
+    };
+  }
+
+  private async botHandleInbound(chatId: string, remoteJid: string, message: any) {
+    try {
+      const buttonId = message?.type === 'interactive' ? message.interactive?.button_reply?.id : undefined;
+      await botService.handleInbound(
+        chatId,
+        typeof buttonId === 'string' ? { kind: 'button', buttonId } : { kind: 'other' },
+        this.botSender(remoteJid),
+      );
+    } catch (error) {
+      this.logger.error(`Bot inbound failed for ${remoteJid} - ${this.instanceId}: ${error}`);
+    }
+  }
+
+  // LYD-35 / LYD-47: primer mensaje de un numero nuevo. Si la instancia tiene
+  // un flujo de bot, arranca el flujo; si no, cae al mensaje de bienvenida
+  // simple de siempre (WelcomeMessageConfig).
   private async sendWelcomeMessageIfEnabled(remoteJid: string, pushName?: string | null): Promise<void> {
     try {
-      const config = await this.prismaRepository.welcomeMessageConfig.findUnique({
-        where: { instanceId: this.instanceId },
-      });
+      const flow = await this.prismaRepository.botFlow.findUnique({ where: { instanceId: this.instanceId } });
 
+      const config = flow
+        ? null
+        : await this.prismaRepository.welcomeMessageConfig.findUnique({ where: { instanceId: this.instanceId } });
       const message = config?.message?.trim();
 
-      if (!config?.enabled || !message) {
+      if (flow ? !flow.enabled : !config?.enabled || !message) {
         return;
       }
 
-      await this.prismaRepository.chat.upsert({
+      // Se le pasa el pushName para que, si chats.upsert corre despues en el
+      // mismo lote, encuentre la fila ya creada y no la pise.
+      const chat = await this.prismaRepository.chat.upsert({
         where: { instanceId_remoteJid: { instanceId: this.instanceId, remoteJid } },
         create: { instanceId: this.instanceId, remoteJid, name: pushName ?? null },
         update: {},
+        select: { id: true },
       });
 
+      // Reclamo atomico: dos eventos casi simultaneos del mismo remoteJid
+      // nunca lo arrancan dos veces.
       const claim = await this.prismaRepository.chat.updateMany({
         where: { instanceId: this.instanceId, remoteJid, welcomeMessageSentAt: null },
         data: { welcomeMessageSentAt: new Date() },
@@ -1297,7 +1340,14 @@ export class BusinessStartupService extends ChannelStartupService {
         return;
       }
 
-      await this.textMessage({ number: remoteJid, text: message }, false);
+      if (flow) {
+        await botService.startFlow(this.instanceId, chat.id, this.botSender(remoteJid));
+        return;
+      }
+
+      // Si textMessage falla no se reintenta en un mensaje siguiente:
+      // aceptado para v1 -- mejor perder una bienvenida que mandarla dos veces.
+      await this.textMessage({ number: remoteJid, text: message as string }, false);
     } catch (error) {
       this.logger.error(`Welcome message failed for ${remoteJid} - ${this.instanceId}: ${error}`);
     }

@@ -57,6 +57,9 @@ export class CrmService {
         const chats = await this.prisma.chat.findMany({
           where: {
             instanceId: instance.id,
+            // LYD-40: "cerradas" (archivadas) no aparecen en la lista
+            // principal del inbox -- reversible, el historial sigue ahi.
+            archived: false,
             ...(status ? { status } : {}),
             ...(assignedAgentId ? { assignedAgentId } : {}),
           },
@@ -161,6 +164,7 @@ export class CrmService {
       unreadMessages?: number;
       contactNameOverride?: string | null;
       contactPhoneOverride?: string | null;
+      archived?: boolean;
     },
   ) {
     const chat = await this.assertChatExists(chatId);
@@ -231,6 +235,31 @@ export class CrmService {
       data: { chatId, content: data.content, agentId: data.agentId ?? null },
       include: { Agent: true },
     });
+  }
+
+  // LYD-40: borrado real (Chat + Message) -- distinto de "archivar"
+  // (Chat.archived), que es reversible. Message no tiene FK a Chat (se
+  // identifica por instanceId + key.remoteJid, igual que en
+  // lastMessageByRemoteJid mas arriba), asi que hay que borrarlos aparte;
+  // ConversationNote sale solo por el onDelete: Cascade del schema.
+  //
+  // Se bloquea si hay un Lead vinculado -- Lead.chatId no tiene cascada
+  // (a proposito, ver schema) para no destruir informacion de pipeline
+  // comercial sin que alguien lo decida a mano primero.
+  public async deleteConversation(chatId: string) {
+    const chat = await this.assertChatExists(chatId);
+
+    const lead = await this.prisma.lead.findUnique({ where: { chatId } });
+    if (lead) {
+      throw new BadRequestException(
+        'No se puede eliminar una conversacion con un lead vinculado -- desvincula el lead primero',
+      );
+    }
+
+    await this.prisma.message.deleteMany({
+      where: { instanceId: chat.instanceId, key: { path: ['remoteJid'], equals: chat.remoteJid } },
+    });
+    await this.prisma.chat.delete({ where: { id: chatId } });
   }
 
   private async assertChatExists(chatId: string) {

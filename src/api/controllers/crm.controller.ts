@@ -28,9 +28,14 @@ export class CrmController {
       unreadMessages?: number;
       contactNameOverride?: string | null;
       contactPhoneOverride?: string | null;
+      archived?: boolean;
     },
   ) {
     return this.crmService.updateConversation(chatId, data);
+  }
+
+  public async deleteConversation(chatId: string) {
+    return this.crmService.deleteConversation(chatId);
   }
 
   public async listNotes(chatId: string) {

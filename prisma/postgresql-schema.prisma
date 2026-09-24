@@ -184,6 +184,11 @@ model Chat {
   // historial previo) ya se le mando el mensaje de bienvenida automatico, para
   // no repetirlo en mensajes siguientes del mismo remoteJid.
   welcomeMessageSentAt DateTime? @db.Timestamp
+  // LYD-40: "cerrar" una conversacion desde el inbox -- se oculta de la
+  // lista principal (listConversations la excluye por default) pero el
+  // historial de mensajes queda intacto y es reversible. Distinto de
+  // "eliminar" (borra el Chat y sus mensajes de verdad, ver crm.service).
+  archived Boolean @default(false)
 
   @@unique([instanceId, remoteJid])
   @@index([instanceId])

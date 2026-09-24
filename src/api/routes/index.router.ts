@@ -13,6 +13,7 @@ import fs from 'fs';
 import mimeTypes from 'mime-types';
 import path from 'path';
 
+import { BotRouter } from './bot.router';
 import { BusinessRouter } from './business.router';
 import { CalendarEventsRouter } from './calendar-events.router';
 import { CallRouter } from './call.router';
@@ -241,6 +242,7 @@ router
   .use('/crm/template-groups', authGuard['apikey'], new TemplatesRouter().router)
   .use('/crm/templates', authGuard['apikey'], new TemplateItemsRouter().router)
   .use('/crm/insights', authGuard['apikey'], new InsightsRouter().router)
+  .use('/crm/bot', authGuard['apikey'], new BotRouter().router)
   .use('/crm/welcome-message', authGuard['apikey'], new WelcomeMessageRouter().router)
   .use('', new ChannelRouter(configService, ...guards).router)
   .use('', new EventRouter(configService, ...guards).router)

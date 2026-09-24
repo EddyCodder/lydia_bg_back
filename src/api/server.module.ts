@@ -3,6 +3,7 @@ import { Chatwoot, configService, ProviderSession } from '@config/env.config';
 import { eventEmitter } from '@config/event.config';
 import { Logger } from '@config/logger.config';
 
+import { BotController } from './controllers/bot.controller';
 import { BusinessController } from './controllers/business.controller';
 import { CalendarEventsController } from './controllers/calendar-events.controller';
 import { CallController } from './controllers/call.controller';
@@ -45,6 +46,7 @@ import { S3Controller } from './integrations/storage/s3/controllers/s3.controlle
 import { S3Service } from './integrations/storage/s3/services/s3.service';
 import { ProviderFiles } from './provider/sessions';
 import { PrismaRepository } from './repository/repository.service';
+import { BotService } from './services/bot.service';
 import { CacheService } from './services/cache.service';
 import { CalendarEventsService } from './services/calendar-events.service';
 import { CrmService } from './services/crm.service';
@@ -113,6 +115,9 @@ export const templatesController = new TemplatesController(templatesService);
 
 const insightsService = new InsightsService(prismaRepository);
 export const insightsController = new InsightsController(insightsService);
+
+export const botService = new BotService(prismaRepository);
+export const botController = new BotController(botService);
 
 const welcomeMessageService = new WelcomeMessageService(prismaRepository);
 export const welcomeMessageController = new WelcomeMessageController(welcomeMessageService);

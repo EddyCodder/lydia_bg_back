@@ -755,7 +755,24 @@ export class BusinessStartupService extends ChannelStartupService {
           });
         }
 
+        // LYD-35: hay que mirar si el Chat existia ANTES de touchChat -- ese
+        // metodo lo crea/actualiza siempre, asi que despues de llamarlo
+        // "existingChat" ya no serviria para distinguir un numero nuevo.
+        const existingChatForWelcome = await this.prismaRepository.chat.findFirst({
+          where: { instanceId: this.instanceId, remoteJid: key.remoteJid },
+          select: { id: true },
+        });
+
         await this.touchChat(key.remoteJid, pushName);
+
+        // LYD-35: numero sin Chat previo -- candidato a mensaje de
+        // bienvenida automatico. Este es el canal WhatsApp real de Brittany
+        // Group (WHATSAPP-BUSINESS via Cloud API) -- no confundir con
+        // whatsapp.baileys.service.ts (WHATSAPP-BAILEYS), que tiene su
+        // propia copia de esta misma logica para el canal QR/no oficial.
+        if (!existingChatForWelcome && !key.fromMe && message.type !== 'reaction') {
+          await this.sendWelcomeMessageIfEnabled(key.remoteJid, pushName);
+        }
 
         const contact = await this.prismaRepository.contact.findFirst({
           where: { instanceId: this.instanceId, remoteJid: key.remoteJid },
@@ -1250,6 +1267,42 @@ export class BusinessStartupService extends ChannelStartupService {
   }
 
   // Send Message Controller
+  // LYD-35: mensaje de bienvenida automatico, v1 -- misma logica que
+  // whatsapp.baileys.service.ts (duplicada a proposito, mismo criterio que
+  // touchChat: cada canal reimplementa su manejo de Chat, no se comparte).
+  private async sendWelcomeMessageIfEnabled(remoteJid: string, pushName?: string | null): Promise<void> {
+    try {
+      const config = await this.prismaRepository.welcomeMessageConfig.findUnique({
+        where: { instanceId: this.instanceId },
+      });
+
+      const message = config?.message?.trim();
+
+      if (!config?.enabled || !message) {
+        return;
+      }
+
+      await this.prismaRepository.chat.upsert({
+        where: { instanceId_remoteJid: { instanceId: this.instanceId, remoteJid } },
+        create: { instanceId: this.instanceId, remoteJid, name: pushName ?? null },
+        update: {},
+      });
+
+      const claim = await this.prismaRepository.chat.updateMany({
+        where: { instanceId: this.instanceId, remoteJid, welcomeMessageSentAt: null },
+        data: { welcomeMessageSentAt: new Date() },
+      });
+
+      if (claim.count === 0) {
+        return;
+      }
+
+      await this.textMessage({ number: remoteJid, text: message }, false);
+    } catch (error) {
+      this.logger.error(`Welcome message failed for ${remoteJid} - ${this.instanceId}: ${error}`);
+    }
+  }
+
   public async textMessage(data: SendTextDto, isIntegration = false) {
     const res = await this.sendMessageWithTyping(
       data.number,

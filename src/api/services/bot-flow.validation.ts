@@ -25,6 +25,12 @@ export interface BotEdge {
   from: string;
   fromOption?: string | null; // id de la opcion (question) o null (message)
   to: string;
+  // LYD-51: de que lado del nodo destino entra la conexion en el editor de
+  // canvas (arriba/abajo/izquierda/derecha) -- puramente cosmetico, el motor
+  // (bot.service.ts) nunca lo lee. Se guarda tal cual para que el front
+  // pueda reconstruir el layout horizontal/vertical real al recargar, en
+  // vez de que todo vuelva a entrar por arriba.
+  toHandle?: string | null;
 }
 
 export interface BotGraph {
@@ -152,7 +158,8 @@ export function validateBotGraph(input: unknown): BotValidationResult & { graph?
       continue;
     }
     usedSources.add(sourceKey);
-    edges.push({ id: raw.id, from: raw.from, fromOption, to: raw.to });
+    const toHandle = typeof raw.toHandle === 'string' ? raw.toHandle : null;
+    edges.push({ id: raw.id, from: raw.from, fromOption, to: raw.to, toHandle });
   }
 
   const startNodeId = typeof input.startNodeId === 'string' ? input.startNodeId : null;

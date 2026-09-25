@@ -1,11 +1,15 @@
 // LYD-53: sidecar minimo que implementa el contrato de API_AUDIO_CONVERTER
 // que Evolution API ya espera (ver processAudio() en
-// src/api/integrations/channel/meta/whatsapp.business.service.ts del fork,
-// no tocado por esto): recibe el audio como multipart `file`, o como campo
-// de texto `url`/`base64` dentro del mismo multipart (asi es como el fork
-// arma el FormData), lo convierte a mp3 con ffmpeg y devuelve
-// { audio: "<base64 mp3>" }. Se escribe a medida en vez de asumir una imagen
-// de terceros ya lista, para no depender de un origen no verificado.
+// src/api/integrations/channel/meta/whatsapp.business.service.ts del fork):
+// recibe el audio como multipart `file`, o como campo de texto `url`/`base64`
+// dentro del mismo multipart (asi arma el FormData el fork), y lo convierte a
+// ogg/opus mono 16kHz -- el unico formato que WhatsApp muestra como nota de
+// voz real (burbuja compacta, forma de onda). Un mp3 tambien es reproducible
+// para Meta, pero WhatsApp lo renderiza como adjunto de archivo generico (con
+// nombre/extension visibles), no como nota de voz -- confirmado en produccion.
+// Devuelve { audio: "<base64 ogg/opus>" }. Se escribe a medida en vez de
+// asumir una imagen de terceros ya lista, para no depender de un origen no
+// verificado.
 const express = require('express');
 const multer = require('multer');
 const axios = require('axios');
@@ -39,11 +43,17 @@ async function resolveInputBuffer(req) {
   throw new Error('Sin audio de entrada: se esperaba file, url o base64');
 }
 
-function convertToMp3(buffer) {
+// Mono, 16kHz, libopus -- espec de nota de voz de WhatsApp (Meta solo la
+// renderiza como voice note con audio/ogg de codec opus; cualquier otro
+// mimetype de audio, aunque reproducible, cae a adjunto de archivo generico).
+function convertToVoiceNote(buffer) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     const output = ffmpeg(Readable.from(buffer))
-      .toFormat('mp3')
+      .audioCodec('libopus')
+      .audioChannels(1)
+      .audioFrequency(16000)
+      .toFormat('ogg')
       .on('error', (err) => reject(new Error(`ffmpeg fallo: ${err.message}`)))
       .pipe();
     output.on('data', (chunk) => chunks.push(chunk));
@@ -56,8 +66,8 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 app.post('/process-audio', requireApiKey, upload.single('file'), async (req, res) => {
   try {
     const input = await resolveInputBuffer(req);
-    const mp3 = await convertToMp3(input);
-    res.json({ audio: mp3.toString('base64') });
+    const ogg = await convertToVoiceNote(input);
+    res.json({ audio: ogg.toString('base64') });
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : 'Error desconocido' });
   }

@@ -1508,7 +1508,12 @@ export class BusinessStartupService extends ChannelStartupService {
         formData.append('base64', audio);
       }
 
-      formData.append('format', 'mp3');
+      // LYD-53: ogg/opus, no mp3 -- es el unico formato que WhatsApp muestra
+      // como nota de voz real (burbuja compacta con forma de onda). Un mp3
+      // sigue siendo un audio valido para Meta, pero se ve como adjunto de
+      // archivo generico (con nombre y extension visibles), no como nota de
+      // voz -- confirmado en produccion (LYD-53).
+      formData.append('format', 'ogg');
 
       const response = await axios.post(audioConverterConfig.API_URL, formData, {
         headers: {
@@ -1524,10 +1529,10 @@ export class BusinessStartupService extends ChannelStartupService {
       }
 
       const prepareMedia: any = {
-        fileName: `${hash}.mp3`,
+        fileName: `${hash}.ogg`,
         mediaType: 'audio',
         media: audioConverter,
-        mimetype: 'audio/mpeg',
+        mimetype: 'audio/ogg; codecs=opus',
       };
 
       const id = await this.getIdMedia(prepareMedia);

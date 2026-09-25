@@ -111,6 +111,25 @@ services:
       - lydia_internal_net
 
   # --------------------------------------------------------------------------
+  # Sidecar de conversion de audio (LYD-53) -- convierte a mp3 con ffmpeg las
+  # notas de voz grabadas en el navegador (webm/opus o mp4/aac, segun el
+  # browser) antes de que evolution-api las suba a WhatsApp. Implementa el
+  # contrato que el fork ya espera via API_AUDIO_CONVERTER (processAudio() en
+  # whatsapp.business.service.ts) -- ver deploy/lydia-prod/audio-converter/.
+  # Solo visible dentro de lydia_internal_net, sin puerto publicado.
+  # --------------------------------------------------------------------------
+  audio-converter:
+    build:
+      context: ./audio-converter
+    image: lydia-audio-converter:prod
+    container_name: lydia_audio_converter
+    restart: unless-stopped
+    environment:
+      API_AUDIO_CONVERTER_KEY: ${API_AUDIO_CONVERTER_KEY}
+    networks:
+      - lydia_internal_net
+
+  # --------------------------------------------------------------------------
   # Evolution API v2 -- build desde el fork lydia_bg_back (no Docker Hub)
   # --------------------------------------------------------------------------
   evolution-api:
@@ -160,6 +179,11 @@ services:
 
       CONFIG_SESSION_PHONE_CLIENT: "Brittany Chat"
       CONFIG_SESSION_PHONE_NAME: Chrome
+
+      # LYD-53: sidecar de conversion de audio (mismo alias de servicio que
+      # arriba), para que las notas de voz lleguen a WhatsApp como mp3.
+      API_AUDIO_CONVERTER: http://audio-converter:4040/process-audio
+      API_AUDIO_CONVERTER_KEY: ${API_AUDIO_CONVERTER_KEY}
     volumes:
       - evolution_instances:/evolution/instances
     networks:

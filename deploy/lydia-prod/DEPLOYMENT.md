@@ -22,6 +22,7 @@ que caer).
 | Frontend (Next.js) | `127.0.0.1:3009` → `crm.brittanygroup.edu.pe` |
 | Evolution API      | `127.0.0.1:8091` → `api-crm.brittanygroup.edu.pe` (no 8090: lo ocupa la LAPI de CrowdSec) |
 | Postgres / Redis   | contenedores propios (`lydia_postgres`, `lydia_redis`), red `lydia_internal_net` — no el MySQL/Redis nativos del host |
+| Audio converter    | `lydia_audio_converter`, solo interno a `lydia_internal_net` (sin puerto publicado) |
 | Usuario deploy     | `deploy_lydia` |
 | Wrappers de reload | `/usr/local/sbin/deploy-reload-lydia-back`, `/usr/local/sbin/deploy-reload-lydia-front` |
 
@@ -38,6 +39,18 @@ construya endpoints reales de conversaciones/asignación/notas en
 
 `evolution-api` sigue siendo build propio (`./back`, fork `lydia_bg_back`)
 en vez de pullear `evoapicloud/evolution-api:latest` de Docker Hub.
+
+## Notas de voz (audio-converter)
+
+Las notas de voz grabadas en el navegador (`lydia_bg_front`) llegan como
+webm/opus o mp4/aac según el browser. `evolution-api` ya sabe pasar el audio
+por un conversor externo antes de subirlo a WhatsApp (`API_AUDIO_CONVERTER`,
+nativo del fork, sin tocar código), y ese conversor es el servicio
+`audio-converter` de este mismo `docker-compose.yml` (build desde
+`./audio-converter`, Express + ffmpeg, sin puerto publicado — solo
+`evolution-api` le habla adentro de `lydia_internal_net`). Se autentica con
+`API_AUDIO_CONVERTER_KEY` (header `apikey`), generada por
+`generate_secrets.sh` igual que el resto de los secretos de este `.env`.
 
 ## Desplegar
 
@@ -57,7 +70,7 @@ afectado — el build corre en el propio VPS, no hay registry.
    `.env.example`, `generate_secrets.sh`) a `/lydia_prod/`, correr
    `./generate_secrets.sh` ahí para generar el `.env` real (600, root).
 4. `docker compose up -d db redis`, esperar healthy, después
-   `docker compose up -d --build frontend evolution-api`.
+   `docker compose up -d --build audio-converter frontend evolution-api`.
 5. Nginx + certbot para `crm.brittanygroup.edu.pe` y
    `api-crm.brittanygroup.edu.pe` (DNS de ambos ya apunta a la IP del VPS).
 

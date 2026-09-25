@@ -1545,7 +1545,10 @@ export class BusinessStartupService extends ChannelStartupService {
         fileName: `${hash}.ogg`,
         mediaType: 'audio',
         media: audioConverter,
-        mimetype: 'audio/ogg; codecs=opus',
+        // Sin espacio: este string tambien termina armando un data: URI del
+        // lado del front (data:<mimetype>;base64,...) -- un espacio crudo ahi
+        // es invalido/ambiguo (RFC 2397).
+        mimetype: 'audio/ogg;codecs=opus',
       };
 
       const id = await this.getIdMedia(prepareMedia);
@@ -1827,7 +1830,14 @@ export class BusinessStartupService extends ChannelStartupService {
           height: mediaMessage?.fileLength,
           width: mediaMessage?.width,
         },
-        mimetype: mediaMessage?.mime_type,
+        // LYD-53 fix: `mime_type` es como llega un adjunto ENTRANTE (asi lo
+        // manda el webhook de Meta, ver messageAudioJson/messageMediaJson),
+        // pero un adjunto SALIENTE armado por nosotros (processAudio(),
+        // mediaMessage()) usa `mimetype` -- mismo patron que ya tenia
+        // fileName/filename arriba, pero le faltaba a este campo. Sin el
+        // fallback, un audio/imagen que mandamos nosotros llegaba al front
+        // con mimetype undefined -- el navegador no podia reproducirlo.
+        mimetype: mediaMessage?.mime_type ?? mediaMessage?.mimetype,
         base64: msg.message.base64,
       };
     } catch (error) {

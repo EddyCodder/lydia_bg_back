@@ -439,6 +439,14 @@ export class BusinessStartupService extends ChannelStartupService {
   protected async messageHandle(received: any, database: Database, settings: any, remoteJid?: string) {
     try {
       let messageRaw: any;
+      // LYD-53: el branch de S3 (mas abajo) es el UNICO lugar que hoy graba
+      // el Message de un adjunto entrante -- sin S3 configurado (como en
+      // Brittany), un audio/imagen/video/documento/sticker que manda un
+      // cliente nunca llegaba a la base, y por eso nunca aparecia en el
+      // inbox (ni con error: directamente no existia el registro). Este
+      // flag asegura que se cree igual mas abajo cuando el branch de S3 no
+      // corrio (o no tenia media valida).
+      let mediaMessageCreated = false;
 
       // Los contactos de estados y los usuarios con username pueden venir sin `profile` o sin `name`.
       const profile = received.contacts?.[0]?.profile;
@@ -557,6 +565,7 @@ export class BusinessStartupService extends ChannelStartupService {
                 const createdMessage = await this.prismaRepository.message.create({
                   data: messageRaw,
                 });
+                mediaMessageCreated = true;
 
                 await this.prismaRepository.media.create({
                   data: {
@@ -749,7 +758,11 @@ export class BusinessStartupService extends ChannelStartupService {
           }
         }
 
-        if (!this.isMediaMessage(message) && message.type !== 'sticker') {
+        // LYD-53: antes esto excluia media/sticker asumiendo que el branch de
+        // S3 ya los habia creado -- sin S3 configurado (Brittany) o sin media
+        // valida ahi, `mediaMessageCreated` sigue en false y el mensaje se
+        // crea aca, como cualquier otro tipo.
+        if (!mediaMessageCreated) {
           await this.prismaRepository.message.create({
             data: messageRaw,
           });

@@ -81,10 +81,23 @@ export class BusinessStartupService extends ChannelStartupService {
       const version = this.configService.get<WaBusiness>('WA_BUSINESS').VERSION;
       urlServer = `${urlServer}/${version}/${this.number}/${params}`;
       const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` };
-      const result = await axios.post(urlServer, message, { headers });
+      const result = await axios.post(urlServer, message, { headers, timeout: 30000 });
       return result.data;
     } catch (e) {
-      return e.response?.data?.error;
+      // Meta responde { error: {...} }; ante un corte de red, timeout o un 5xx sin
+      // ese cuerpo no hay e.response.data.error, y devolver undefined escondia el fallo real.
+      const metaError = e.response?.data?.error;
+      if (metaError) {
+        this.logger.error(`Meta API error en ${params}: ${JSON.stringify(metaError)}`);
+        return metaError;
+      }
+      const detail = {
+        message: e.message || 'Error desconocido al llamar a la API de Meta',
+        code: e.code,
+        status: e.response?.status,
+      };
+      this.logger.error(`Fallo la llamada a Meta API en ${params}: ${JSON.stringify(detail)}`);
+      return { ...detail, error_data: detail };
     }
   }
 
@@ -1234,9 +1247,12 @@ export class BusinessStartupService extends ChannelStartupService {
         }
       })();
 
-      if (messageSent?.error_data || messageSent.message) {
-        this.logger.error(messageSent);
-        return messageSent;
+      if (!messageSent || messageSent.error_data || messageSent.message) {
+        // Antes se devolvia el error como si fuera un envio exitoso y el cliente
+        // no se enteraba de que el mensaje no salio.
+        const reason = messageSent?.message || 'la API de Meta no devolvio respuesta';
+        const code = messageSent?.code ? ` (codigo ${messageSent.code})` : '';
+        throw `No se pudo enviar el mensaje a Meta: ${reason}${code}`;
       }
 
       const messageRaw: any = {

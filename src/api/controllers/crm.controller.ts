@@ -16,6 +16,10 @@ export class CrmController {
     return this.crmService.listConversations(query);
   }
 
+  public async searchMessages(query: { q?: string; instanceName?: string; limit?: string }) {
+    return this.crmService.searchMessages(query);
+  }
+
   public async getConversation(chatId: string) {
     return this.crmService.getConversation(chatId);
   }

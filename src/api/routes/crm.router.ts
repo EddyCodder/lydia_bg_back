@@ -30,6 +30,12 @@ export class CrmRouter {
         };
         return res.json(await crmController.listConversations({ instanceName, status, assignedAgentId }));
       })
+      // LYD-60: tiene que ir antes de /conversations/:chatId, si no Express
+      // toma "search" como un chatId.
+      .get('/conversations/search', async (req, res) => {
+        const { q, instanceName, limit } = req.query as { q?: string; instanceName?: string; limit?: string };
+        return res.json(await crmController.searchMessages({ q, instanceName, limit }));
+      })
       .get('/conversations/:chatId', async (req, res) => {
         return res.json(await crmController.getConversation(req.params.chatId));
       })

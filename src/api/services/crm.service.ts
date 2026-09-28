@@ -1,7 +1,40 @@
 import { PrismaRepository } from '@api/repository/repository.service';
 import { BadRequestException, NotFoundException } from '@exceptions';
-import { AgentRole, ChatStatus } from '@prisma/client';
+import { AgentRole, ChatStatus, Prisma } from '@prisma/client';
 import { status as messageStatus } from '@utils/renderStatus';
+
+import { buildSnippet, escapeLike, normalizeSearchLimit, SEARCH_MIN_LENGTH } from './crm-search.util';
+
+// LYD-60: texto buscable de un mensaje -- texto plano, texto extendido
+// (respuestas/links) y caption/nombre de archivo de los adjuntos. Tiene que
+// quedar identica a la expresion del indice trigram de la migracion
+// 20260928000000_add_message_search_trgm (sin el alias "m").
+const MESSAGE_SEARCH_TEXT = Prisma.raw(`COALESCE(
+  m."message"->>'conversation',
+  m."message"->'extendedTextMessage'->>'text',
+  m."message"->'imageMessage'->>'caption',
+  m."message"->'videoMessage'->>'caption',
+  m."message"->'documentMessage'->>'caption',
+  m."message"->'documentMessage'->>'fileName',
+  ''
+)`);
+
+type SearchMessageRow = {
+  messageId: string;
+  timestamp: number;
+  fromMe: boolean;
+  pushName: string | null;
+  text: string;
+  chatId: string;
+  remoteJid: string;
+  chatName: string | null;
+  contactNameOverride: string | null;
+  contactPhoneOverride: string | null;
+  instanceName: string;
+  integration: string;
+  contactPushName: string | null;
+  profilePicUrl: string | null;
+};
 
 // CRM-12: capa de agentes humanos sobre las conversaciones de WhatsApp que
 // ya persiste Evolution API (Chat/Contact/Message). No reimplementa nada de
@@ -133,6 +166,58 @@ export class CrmService {
     if (body?.documentMessage) return 'Documento';
     if (body?.stickerMessage) return 'Sticker';
     return '';
+  }
+
+  // LYD-60: busqueda contextual dentro de los mensajes (estilo WhatsApp).
+  // SQL crudo porque el texto vive dentro del JSON de Message.message (no hay
+  // columna body/caption propia) y hay que cruzar con Chat por
+  // key->>'remoteJid', igual que en updateConversation. La expresion de texto
+  // (MESSAGE_SEARCH_TEXT) es la misma que la del indice trigram.
+  public async searchMessages(params: { q?: string; instanceName?: string; limit?: unknown }) {
+    const term = params.q?.trim() ?? '';
+    if (term.length < SEARCH_MIN_LENGTH) {
+      throw new BadRequestException(`q debe tener al menos ${SEARCH_MIN_LENGTH} caracteres`);
+    }
+    const limit = normalizeSearchLimit(params.limit);
+    const pattern = `%${escapeLike(term)}%`;
+
+    // Solo conversaciones visibles en el inbox (archived = false, LYD-40): un
+    // resultado de un chat archivado no se podria abrir desde la lista.
+    const rows = await this.prisma.$queryRaw<SearchMessageRow[]>`
+      SELECT
+        m."id" AS "messageId",
+        m."messageTimestamp" AS "timestamp",
+        COALESCE((m."key"->>'fromMe')::boolean, false) AS "fromMe",
+        m."pushName" AS "pushName",
+        ${MESSAGE_SEARCH_TEXT} AS "text",
+        c."id" AS "chatId",
+        c."remoteJid" AS "remoteJid",
+        c."name" AS "chatName",
+        c."contactNameOverride" AS "contactNameOverride",
+        c."contactPhoneOverride" AS "contactPhoneOverride",
+        i."name" AS "instanceName",
+        i."integration" AS "integration",
+        ct."pushName" AS "contactPushName",
+        ct."profilePicUrl" AS "profilePicUrl"
+      FROM "Message" m
+      JOIN "Chat" c ON c."instanceId" = m."instanceId" AND c."remoteJid" = m."key"->>'remoteJid'
+      JOIN "Instance" i ON i."id" = m."instanceId"
+      LEFT JOIN "Contact" ct ON ct."instanceId" = c."instanceId" AND ct."remoteJid" = c."remoteJid"
+      WHERE ${MESSAGE_SEARCH_TEXT} ILIKE ${pattern}
+        AND c."archived" = false
+        ${params.instanceName ? Prisma.sql`AND i."name" = ${params.instanceName}` : Prisma.empty}
+      ORDER BY m."messageTimestamp" DESC
+      LIMIT ${limit}
+    `;
+
+    return {
+      query: term,
+      messages: rows.map(({ text, ...row }) => ({
+        ...row,
+        timestamp: Number(row.timestamp),
+        snippet: buildSnippet(text, term),
+      })),
+    };
   }
 
   public async getConversation(chatId: string) {

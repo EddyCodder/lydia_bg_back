@@ -334,17 +334,22 @@ export class CrmService {
   public async deleteConversation(chatId: string) {
     const chat = await this.assertChatExists(chatId);
 
-    const lead = await this.prisma.lead.findUnique({ where: { chatId } });
-    if (lead) {
-      throw new BadRequestException(
-        'No se puede eliminar una conversacion con un lead vinculado -- desvincula el lead primero',
-      );
-    }
+    // LYD-63: el lead vinculado se borra junto con la conversacion (presupuesto,
+    // etapa, observaciones y sus eventos de calendario). Todo en una sola
+    // transaccion para no dejar datos huerfanos si algo falla a medias. Las
+    // notas internas caen solas por el onDelete: Cascade de ConversationNote.
+    await this.prisma.$transaction(async (tx) => {
+      const lead = await tx.lead.findUnique({ where: { chatId } });
+      if (lead) {
+        await tx.calendarEvent.deleteMany({ where: { leadId: lead.id } });
+        await tx.lead.delete({ where: { id: lead.id } });
+      }
 
-    await this.prisma.message.deleteMany({
-      where: { instanceId: chat.instanceId, key: { path: ['remoteJid'], equals: chat.remoteJid } },
+      await tx.message.deleteMany({
+        where: { instanceId: chat.instanceId, key: { path: ['remoteJid'], equals: chat.remoteJid } },
+      });
+      await tx.chat.delete({ where: { id: chatId } });
     });
-    await this.prisma.chat.delete({ where: { id: chatId } });
   }
 
   private async assertChatExists(chatId: string) {

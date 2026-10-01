@@ -24,7 +24,15 @@ const API_KEY = process.env.API_AUDIO_CONVERTER_KEY || '';
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
-const upload = multer({ storage: multer.memoryStorage() });
+// LYD-62: evolution-api manda la nota de voz como campo de texto `base64` del
+// multipart, no como `file` -- y multer corta por defecto cualquier campo de
+// texto en 1 MB, lo que tumbaba toda nota de voz de mas de ~40 s. WhatsApp
+// acepta audio de hasta 16 MB (~21 MB en base64); 25 MB deja margen.
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fieldSize: MAX_AUDIO_BYTES, fileSize: MAX_AUDIO_BYTES },
+});
 
 function requireApiKey(req, res, next) {
   if (!API_KEY || req.header('apikey') !== API_KEY) {
@@ -71,6 +79,16 @@ app.post('/process-audio', requireApiKey, upload.single('file'), async (req, res
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : 'Error desconocido' });
   }
+});
+
+// Sin esto, un error de multer (limite excedido) sale como 500 HTML generico
+// de Express en vez de un JSON que evolution-api pueda loguear.
+app.use((err, _req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    const status = err.code === 'LIMIT_FIELD_VALUE' || err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    return res.status(status).json({ error: `${err.code}: ${err.message}` });
+  }
+  next(err);
 });
 
 app.listen(PORT, () => {
